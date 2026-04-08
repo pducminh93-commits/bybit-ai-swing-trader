@@ -17,7 +17,7 @@ export default defineConfig(({mode}) => {
       dedupe: ['react', 'react-dom'],
     },
     server: {
-      port: 3002,
+      port: 3000,
       host: '0.0.0.0',
       hmr: {
         overlay: false,

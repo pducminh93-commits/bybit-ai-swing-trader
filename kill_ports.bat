@@ -1,23 +1,35 @@
 @echo off
 echo ========================================
-echo Killing processes on ports 3000-3004
+echo Killing processes on port 3000 for frontend
 echo ========================================
 echo.
 
-echo Checking for processes using ports 3000-3004...
+echo Checking for processes using port 3000...
 
-REM Try to kill processes on each port
-for /L %%p in (3000,1,3004) do (
-    echo Checking port %%p...
-    REM Use PowerShell to find and kill process
-    powershell -Command "try { $process = Get-NetTCPConnection -LocalPort %%p -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess; if ($process) { Stop-Process -Id $process -Force; Write-Host 'Killed process on port %%p' } else { Write-Host 'No process found on port %%p' } } catch { Write-Host 'No process on port %%p' }" 2>nul
-)
+REM Kill process on port 3000
+powershell -Command "try { $process = Get-NetTCPConnection -LocalPort 3000 -ErrorAction Stop | Select-Object -ExpandProperty OwningProcess; if ($process) { Stop-Process -Id $process -Force; Write-Host 'Killed process on port 3000' } else { Write-Host 'No process found on port 3000' } } catch { Write-Host 'No process on port 3000' }" 2>nul
 
 echo.
 echo Checking Node.js processes...
 taskkill /f /im node.exe >nul 2>&1
 if %errorlevel%==0 (
     echo [OK] Killed Node.js processes
+) else (
+    echo [INFO] No Node.js processes found
+)
+
+echo.
+echo Checking Python processes (for backend)...
+taskkill /f /im python.exe >nul 2>&1
+if %errorlevel%==0 (
+    echo [OK] Killed Python processes
+) else (
+    echo [INFO] No Python processes found
+)
+
+echo.
+echo Port 3000 should now be free for frontend.
+pause
 ) else (
     echo [INFO] No Node.js processes found
 )
