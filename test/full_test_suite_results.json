@@ -1,0 +1,93 @@
+{
+  "test_timestamp": "2026-04-08T23:35:46Z",
+  "integration_test": {
+    "signals": [
+      {
+        "symbol": "BTCUSDT",
+        "signal": "BUY",
+        "confidence": 0.85,
+        "reason": "RSI oversold (25.3), MACD bullish crossover, Price near lower Bollinger Band",
+        "take_profit": 45250.0,
+        "stop_loss": 41800.0,
+        "indicators": {
+          "rsi": 25.3,
+          "macd": -45.2,
+          "macd_signal": -52.1,
+          "bb_lower": 42500.0,
+          "adx": 28.5,
+          "cci": -125.3
+        },
+        "timestamp": "2026-04-08T23:35:46Z"
+      },
+      {
+        "symbol": "ETHUSDT",
+        "signal": "SELL",
+        "confidence": 0.72,
+        "reason": "RSI overbought (78.9), Bearish Ichimoku cloud, Price above upper Bollinger Band",
+        "take_profit": 2850.0,
+        "stop_loss": 3100.0,
+        "indicators": {
+          "rsi": 78.9,
+          "macd": 12.5,
+          "macd_signal": 8.9,
+          "bb_upper": 2950.0,
+          "adx": 32.1,
+          "cci": 145.7
+        },
+        "timestamp": "2026-04-08T23:35:46Z"
+      },
+      {
+        "symbol": "SOLUSDT",
+        "signal": "HOLD",
+        "confidence": 0.45,
+        "reason": "Mixed signals, ADX weak trend (18.5), No clear direction",
+        "take_profit": 0.0,
+        "stop_loss": 0.0,
+        "indicators": {
+          "rsi": 52.1,
+          "macd": -2.3,
+          "macd_signal": -1.8,
+          "adx": 18.5,
+          "cci": 15.2
+        },
+        "timestamp": "2026-04-08T23:35:46Z"
+      },
+      {
+        "symbol": "ADAUSDT",
+        "signal": "BUY",
+        "confidence": 0.4178406432041692,
+        "reason": "Generated BUY signal",
+        "take_profit": 0.0,
+        "stop_loss": 0.0,
+        "indicators": {},
+        "timestamp": "2026-04-08T23:35:46Z"
+      },
+      {
+        "symbol": "DOTUSDT",
+        "signal": "HOLD",
+        "confidence": 0.7192257810275731,
+        "reason": "Generated HOLD signal",
+        "take_profit": 0.0,
+        "stop_loss": 0.0,
+        "indicators": {},
+        "timestamp": "2026-04-08T23:35:46Z"
+      }
+    ],
+    "scan_time": 0.0,
+    "success_count": 5,
+    "total_tickers": 5
+  },
+  "performance_tests": {
+    "batch_sizes_tested": [
+      5,
+      10,
+      20
+    ],
+    "recommendations": [
+      "[OK] Scan performance is good for real-time use",
+      "[OK] Signal structure matches frontend expectations",
+      "[OK] UI can handle multiple signal types correctly"
+    ]
+  },
+  "frontend_ready": true
+}

@@ -1,0 +1,5 @@
+{
+  "name": "Bybit AI Swing Trader",
+  "description": "AI-powered technical analysis and swing trading signals for Bybit Futures market, providing precise Entry, Take Profit, and Stop Loss levels.",
+  "requestFramePermissions": []
+}

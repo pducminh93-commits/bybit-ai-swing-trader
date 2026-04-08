@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+requests
+pandas
+numpy
+ta-lib
+scikit-learn
+tensorflow
+bybit-api
+python-dotenv
+pydantic
