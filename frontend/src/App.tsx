@@ -5,7 +5,8 @@ import {
   Search,
   RefreshCw,
   BarChart3,
-  XCircle
+  XCircle,
+  Settings
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,15 +33,52 @@ export default function App() {
   const [tickers, setTickers] = useState<any[]>([]);
   const [signals, setSignals] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"signals" | "demo" | "training">("signals");
+  const [activeTab, setActiveTab] = useState<"signals" | "settings" | "demo" | "training">("signals");
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+
+  // Auto scan settings
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  const [autoScanInterval, setAutoScanInterval] = useState(30); // minutes
+  const [autoScanTimer, setAutoScanTimer] = useState<NodeJS.Timeout | null>(null);
 
   // Demo trading state
   const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
   const [demoPositions, setDemoPositions] = useState<DemoPosition[]>([]);
   const [demoHistory, setDemoHistory] = useState<DemoTrade[]>([]);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
+
+  // Load settings from localStorage
+  useEffect(() => {
+    const savedAutoScanEnabled = localStorage.getItem('autoScanEnabled') === 'true';
+    const savedAutoScanInterval = parseInt(localStorage.getItem('autoScanInterval') || '30');
+    setAutoScanEnabled(savedAutoScanEnabled);
+    setAutoScanInterval(savedAutoScanInterval);
+  }, []);
+
+  // Auto scan logic
+  useEffect(() => {
+    if (autoScanEnabled) {
+      const interval = setInterval(() => {
+        handleScanAll();
+      }, autoScanInterval * 60 * 1000); // Convert minutes to milliseconds
+      setAutoScanTimer(interval);
+      return () => clearInterval(interval);
+    } else {
+      if (autoScanTimer) {
+        clearInterval(autoScanTimer);
+        setAutoScanTimer(null);
+      }
+    }
+  }, [autoScanEnabled, autoScanInterval]);
+
+  // Save settings to localStorage
+  const saveSettings = (enabled: boolean, interval: number) => {
+    localStorage.setItem('autoScanEnabled', enabled.toString());
+    localStorage.setItem('autoScanInterval', interval.toString());
+    setAutoScanEnabled(enabled);
+    setAutoScanInterval(interval);
+  };
 
   // Fetch tickers on mount and get top 10
   useEffect(() => {
@@ -206,7 +244,25 @@ export default function App() {
                   activeTab === "signals" ? "text-zinc-100" : "text-zinc-400 group-hover:text-zinc-200"
                 )}>Tín hiệu</span>
               </div>
-              
+
+              {/* Settings */}
+              <div
+                onClick={() => setActiveTab("settings")}
+                className={cn(
+                  "flex items-center gap-2 cursor-pointer group transition-all",
+                  activeTab === "settings" ? "opacity-100" : "opacity-40 hover:opacity-80"
+                )}
+              >
+                <Settings className={cn(
+                  "w-4 h-4",
+                  activeTab === "settings" ? "text-orange-500" : "text-zinc-400 group-hover:text-zinc-200"
+                )} />
+                <span className={cn(
+                  "text-xs font-black tracking-widest uppercase transition-colors",
+                  activeTab === "settings" ? "text-zinc-100" : "text-zinc-400 group-hover:text-zinc-200"
+                )}>Settings</span>
+              </div>
+
               {/* Demo */}
               <div 
                 onClick={() => setActiveTab("demo")}
@@ -274,6 +330,22 @@ export default function App() {
           </div>
         )}
 
+        {/* Settings Action Row */}
+        {activeTab === "settings" && (
+          <div className="border-t border-zinc-800/30 bg-black/20">
+            <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="text-xs text-zinc-400">
+                  Auto scan: {autoScanEnabled ? 'ON' : 'OFF'} | Interval: {autoScanInterval} minutes
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${autoScanEnabled ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                <span className="text-xs text-zinc-400">Auto Scan {autoScanEnabled ? 'Active' : 'Inactive'}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
       </header>
 
@@ -319,6 +391,129 @@ export default function App() {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "settings" && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Signal Settings</h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Auto Scan Settings */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Settings className="w-5 h-5" />
+                    Auto Scan Settings
+                  </CardTitle>
+                  <CardDescription>Configure automatic signal scanning</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Auto Scan Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm font-medium text-zinc-200">Auto Scan</label>
+                      <p className="text-xs text-zinc-500">Automatically scan for signals at set intervals</p>
+                    </div>
+                    <button
+                      onClick={() => saveSettings(!autoScanEnabled, autoScanInterval)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        autoScanEnabled ? 'bg-orange-500' : 'bg-zinc-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          autoScanEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Scan Interval */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-sm font-medium text-zinc-200">Scan Interval</label>
+                      <p className="text-xs text-zinc-500">Time between automatic scans (15-240 minutes)</p>
+                    </div>
+
+                    {/* Number Input */}
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="number"
+                        min="15"
+                        max="240"
+                        value={autoScanInterval}
+                        onChange={(e) => {
+                          const value = Math.max(15, Math.min(240, parseInt(e.target.value) || 15));
+                          saveSettings(autoScanEnabled, value);
+                        }}
+                        className="w-20 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                      <span className="text-sm text-zinc-400">minutes</span>
+                    </div>
+
+                    {/* Slider */}
+                    <div className="space-y-2">
+                      <input
+                        type="range"
+                        min="15"
+                        max="240"
+                        step="15"
+                        value={autoScanInterval}
+                        onChange={(e) => saveSettings(autoScanEnabled, parseInt(e.target.value))}
+                        className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                      <div className="flex justify-between text-xs text-zinc-500">
+                        <span>15m</span>
+                        <span>2h</span>
+                        <span>4h</span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-zinc-400">
+                      Next scan: {autoScanEnabled ? `${autoScanInterval} minutes` : 'Disabled'}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Current Status */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5" />
+                    Current Status
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-zinc-800/50 rounded-lg p-3">
+                      <div className="text-xs text-zinc-500">Auto Scan</div>
+                      <div className={`text-lg font-bold ${autoScanEnabled ? 'text-green-500' : 'text-red-500'}`}>
+                        {autoScanEnabled ? 'ON' : 'OFF'}
+                      </div>
+                    </div>
+                    <div className="bg-zinc-800/50 rounded-lg p-3">
+                      <div className="text-xs text-zinc-500">Interval</div>
+                      <div className="text-lg font-bold text-orange-500">
+                        {autoScanInterval}m
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-zinc-800/50 rounded-lg p-3">
+                    <div className="text-xs text-zinc-500 mb-2">Settings Info</div>
+                    <div className="text-sm text-zinc-300 space-y-1">
+                      <div>• Auto scan scans top 10 USDT pairs</div>
+                      <div>• Settings saved in browser localStorage</div>
+                      <div>• Demo auto-executes signals ≥60% confidence</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
         )}
