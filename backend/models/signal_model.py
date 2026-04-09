@@ -11,3 +11,9 @@ class SignalResponse(BaseModel):
     entry_price: Optional[float] = None
     indicators: Optional[Dict[str, Any]] = None
     timestamp: Optional[str] = None
+
+class DemoSettingsRequest(BaseModel):
+    capital: Optional[float] = None
+    leverage: Optional[float] = None
+    position_size_pct: Optional[float] = None
+    reset_data: Optional[bool] = False

@@ -10,7 +10,7 @@ from services.multi_timeframe import MultiTimeframeAnalysis
 from services.ml_model import MLSignalPredictor
 from services.backtester import Backtester
 from services.demo_trading import demo_service
-from models.signal_model import SignalResponse
+from models.signal_model import SignalResponse, DemoSettingsRequest
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -333,24 +333,35 @@ async def get_demo_history():
 
 @app.post("/api/demo/settings")
 async def update_demo_settings(
-    capital: Optional[float] = None,
-    leverage: Optional[float] = None,
-    position_size_pct: Optional[float] = None,
-    reset_data: bool = False
+    settings: dict
 ):
     """Update demo trading settings"""
     try:
-        demo_service.update_settings(capital, leverage, position_size_pct, reset_data)
+        # Safely extract and convert values
+        capital = settings.get('capital')
+        leverage = settings.get('leverage')
+        position_size_pct = settings.get('position_size_pct')
+        reset_data = settings.get('reset_data', False)
+
+        demo_service.update_settings(
+            capital=float(capital) if capital is not None else None,
+            leverage=float(leverage) if leverage is not None else None,
+            position_size_pct=float(position_size_pct) if position_size_pct is not None else None,
+            reset_data=bool(reset_data)
+        )
         return {
             "status": "updated",
             "settings": {
-                "capital": demo_service.capital,
-                "leverage": demo_service.leverage,
-                "position_size_pct": demo_service.position_size_pct
+                "capital": float(demo_service.capital),
+                "leverage": float(demo_service.leverage),
+                "position_size_pct": float(demo_service.position_size_pct)
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")
+        import traceback
+        print(f"Error updating demo settings: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/demo/reset")
 async def reset_demo_simulation():
@@ -364,7 +375,8 @@ async def reset_demo_simulation():
         demo_service.position_size_pct = 10.0
         return {"status": "reset", "message": "Demo simulation reset successfully"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to reset simulation: {str(e)}")
+        print(f"Error resetting demo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def root():

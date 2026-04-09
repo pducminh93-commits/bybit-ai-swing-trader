@@ -1,0 +1,19 @@
+{
+    "capital": 100.0,
+    "leverage": 1.0,
+    "position_size_pct": 10.0,
+    "is_running": true,
+    "positions": {
+        "ARIAUSDT": {
+            "symbol": "ARIAUSDT",
+            "side": "SHORT",
+            "entry_price": 0.35094,
+            "quantity": 28.494899413005076,
+            "entry_time": "2026-04-09T17:22:51.888729",
+            "current_price": 0.35094,
+            "unrealized_pnl": 0.0,
+            "status": "OPEN"
+        }
+    },
+    "history": []
+}

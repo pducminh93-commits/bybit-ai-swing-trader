@@ -1,8 +1,12 @@
+import os
+import json
 from datetime import datetime
 from typing import List, Dict, Optional
 import asyncio
 from services.bybit_service import BybitService
 from models.signal_model import SignalResponse
+
+STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'demo_state.json')
 
 class DemoPosition:
     def __init__(self, symbol: str, side: str, entry_price: float, quantity: float, timestamp: str):
@@ -41,6 +45,32 @@ class DemoPosition:
             'pnl_percentage': (realized_pnl / (self.entry_price * self.quantity)) * 100
         }
 
+    def to_dict(self):
+        return {
+            'symbol': self.symbol,
+            'side': self.side,
+            'entry_price': self.entry_price,
+            'quantity': self.quantity,
+            'entry_time': self.entry_time,
+            'current_price': self.current_price,
+            'unrealized_pnl': self.unrealized_pnl,
+            'status': self.status
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        pos = cls(
+            symbol=data['symbol'],
+            side=data['side'],
+            entry_price=data['entry_price'],
+            quantity=data['quantity'],
+            timestamp=data['entry_time']
+        )
+        pos.current_price = data.get('current_price', data['entry_price'])
+        pos.unrealized_pnl = data.get('unrealized_pnl', 0.0)
+        pos.status = data.get('status', 'OPEN')
+        return pos
+
 class DemoTradingService:
     def __init__(self):
         self.capital = 100.0  # USDT
@@ -50,14 +80,50 @@ class DemoTradingService:
         self.history: List[dict] = []
         self.is_running = False
         self.last_signals: Dict[str, SignalResponse] = {}  # Store last signals to compare
+        self.load_state()
+
+    def save_state(self):
+        """Save demo state to file"""
+        state = {
+            'capital': self.capital,
+            'leverage': self.leverage,
+            'position_size_pct': self.position_size_pct,
+            'is_running': self.is_running,
+            'positions': {k: v.to_dict() for k, v in self.positions.items()},
+            'history': self.history
+        }
+        try:
+            with open(STATE_FILE, 'w') as f:
+                json.dump(state, f, indent=4)
+        except Exception as e:
+            print(f"Error saving demo state: {e}")
+
+    def load_state(self):
+        """Load demo state from file"""
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE, 'r') as f:
+                    state = json.load(f)
+                    self.capital = state.get('capital', 100.0)
+                    self.leverage = state.get('leverage', 1.0)
+                    self.position_size_pct = state.get('position_size_pct', 10.0)
+                    self.is_running = state.get('is_running', False)
+                    self.history = state.get('history', [])
+                    
+                    positions_data = state.get('positions', {})
+                    self.positions = {k: DemoPosition.from_dict(v) for k, v in positions_data.items()}
+            except Exception as e:
+                print(f"Error loading demo state: {e}")
 
     def start_simulation(self):
         """Start the demo trading simulation"""
         self.is_running = True
+        self.save_state()
 
     def stop_simulation(self):
         """Stop the demo trading simulation"""
         self.is_running = False
+        self.save_state()
 
     def get_balance(self) -> float:
         """Get current balance (capital + unrealized P&L)"""
@@ -101,6 +167,8 @@ class DemoTradingService:
         if reset_data or capital_changed:
             self.positions.clear()
             self.history.clear()
+            
+        self.save_state()
 
     def calculate_position_size(self, entry_price: float) -> float:
         """Calculate position size based on percentage of capital and leverage"""
@@ -132,6 +200,9 @@ class DemoTradingService:
         if not current_price:
             return None
 
+        state_changed = False
+        result = None
+
         # Check if we already have a position in this symbol
         if symbol in self.positions and self.positions[symbol].status == 'OPEN':
             existing_pos = self.positions[symbol]
@@ -141,7 +212,8 @@ class DemoTradingService:
                 closed_trade = existing_pos.close_position(current_price, datetime.utcnow().isoformat())
                 self.history.append(closed_trade)
                 del self.positions[symbol]
-                return closed_trade
+                result = closed_trade
+                state_changed = True
         else:
             # Open new position if signal is LONG or SHORT
             if signal.signal in ['LONG', 'SHORT']:
@@ -156,7 +228,7 @@ class DemoTradingService:
                         timestamp=datetime.utcnow().isoformat()
                     )
                     self.positions[symbol] = position
-                    return {
+                    result = {
                         'action': 'OPEN',
                         'symbol': symbol,
                         'side': signal.signal,
@@ -164,8 +236,12 @@ class DemoTradingService:
                         'quantity': quantity,
                         'timestamp': position.entry_time
                     }
+                    state_changed = True
 
-        return None
+        if state_changed:
+            self.save_state()
+
+        return result
 
     def _get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for symbol"""
@@ -184,7 +260,9 @@ class DemoTradingService:
         if not self.is_running:
             return
 
-        for symbol, position in self.positions.items():
+        state_changed = False
+
+        for symbol, position in list(self.positions.items()):
             if position.status == 'OPEN':
                 current_price = self._get_current_price(symbol)
                 if current_price:
@@ -196,19 +274,26 @@ class DemoTradingService:
                             closed_trade = position.close_position(current_price, datetime.utcnow().isoformat())
                             self.history.append(closed_trade)
                             del self.positions[symbol]
+                            state_changed = True
                         elif current_price >= position.entry_price * 1.05:  # 5% take profit
                             closed_trade = position.close_position(current_price, datetime.utcnow().isoformat())
                             self.history.append(closed_trade)
                             del self.positions[symbol]
+                            state_changed = True
                     else:  # SHORT
                         if current_price >= position.entry_price * 1.02:  # 2% stop loss
                             closed_trade = position.close_position(current_price, datetime.utcnow().isoformat())
                             self.history.append(closed_trade)
                             del self.positions[symbol]
+                            state_changed = True
                         elif current_price <= position.entry_price * 0.95:  # 5% take profit
                             closed_trade = position.close_position(current_price, datetime.utcnow().isoformat())
                             self.history.append(closed_trade)
                             del self.positions[symbol]
+                            state_changed = True
+
+        if state_changed:
+            self.save_state()
 
 # Global instance
 demo_service = DemoTradingService()
