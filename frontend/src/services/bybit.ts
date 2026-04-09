@@ -89,6 +89,8 @@ export interface DemoStatus {
   is_running: boolean;
   balance: number;
   capital: number;
+  leverage: number;
+  position_size_pct: number;
   total_positions: number;
   total_trades: number;
 }
@@ -120,6 +122,16 @@ export const getDemoPositions = async (): Promise<{positions: DemoPosition[]; co
 
 export const getDemoHistory = async (): Promise<{history: DemoTrade[]; count: number}> => {
   const response = await axios.get("http://localhost:8000/api/demo/history");
+  return response.data;
+};
+
+export const updateDemoSettings = async (settings: {
+  capital?: number;
+  leverage?: number;
+  position_size_pct?: number;
+  reset_data?: boolean;
+}): Promise<{status: string; settings: any}> => {
+  const response = await axios.post("http://localhost:8000/api/demo/settings", settings);
   return response.data;
 };
 

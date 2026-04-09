@@ -48,6 +48,13 @@ export default function App() {
   const [demoHistory, setDemoHistory] = useState<DemoTrade[]>([]);
   const [isDemoLoading, setIsDemoLoading] = useState(false);
 
+  // Demo settings (loaded from backend)
+  const [demoSettings, setDemoSettings] = useState({
+    capital: 100,
+    leverage: 1.0,
+    position_size_pct: 10
+  });
+
   // Load settings from localStorage
   useEffect(() => {
     const savedAutoScanEnabled = localStorage.getItem('autoScanEnabled') === 'true';
@@ -142,6 +149,15 @@ export default function App() {
       setDemoStatus(status);
       setDemoPositions(positions.positions);
       setDemoHistory(history.history);
+
+      // Sync settings with status
+      if (status) {
+        setDemoSettings({
+          capital: status.capital,
+          leverage: status.leverage,
+          position_size_pct: status.position_size_pct
+        });
+      }
     } catch (err) {
       console.error("Failed to load demo data:", err);
     }
@@ -175,6 +191,33 @@ export default function App() {
     }
   };
 
+  const handleUpdateDemoSettings = async (newSettings: Partial<typeof demoSettings>) => {
+    setIsDemoLoading(true);
+    try {
+      const updatedSettings = { ...demoSettings, ...newSettings };
+      const capitalChanged = demoStatus && updatedSettings.capital !== demoStatus.capital;
+
+      await updateDemoSettings({
+        ...updatedSettings,
+        reset_data: capitalChanged
+      });
+
+      // Refresh status
+      const status = await getDemoStatus();
+      setDemoStatus(status);
+      setDemoSettings({
+        capital: status.capital,
+        leverage: status.leverage,
+        position_size_pct: status.position_size_pct
+      });
+    } catch (err) {
+      console.error(err);
+      setError("Failed to update demo settings");
+    } finally {
+      setIsDemoLoading(false);
+    }
+  };
+
   const handleResetDemo = async () => {
     setIsDemoLoading(true);
     try {
@@ -183,6 +226,11 @@ export default function App() {
       setDemoStatus(status);
       setDemoPositions([]);
       setDemoHistory([]);
+      setDemoSettings({
+        capital: status.capital,
+        leverage: status.leverage,
+        position_size_pct: status.position_size_pct
+      });
     } catch (err) {
       console.error(err);
       setError("Failed to reset demo simulation");
@@ -557,7 +605,7 @@ export default function App() {
 
             {/* Demo Status */}
             {demoStatus && (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <Card className="bg-zinc-900/50 border-zinc-800">
                   <CardContent className="p-4">
                     <div className="text-sm text-zinc-400">Balance</div>
@@ -582,6 +630,22 @@ export default function App() {
                     <div className="text-sm text-zinc-400">Total Trades</div>
                     <div className="text-lg font-bold text-blue-500">
                       {demoStatus.total_trades}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-zinc-900/50 border-zinc-800">
+                  <CardContent className="p-4">
+                    <div className="text-sm text-zinc-400">Leverage</div>
+                    <div className="text-lg font-bold text-purple-500">
+                      {demoStatus.leverage?.toFixed(1) || '1.0'}x
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-zinc-900/50 border-zinc-800">
+                  <CardContent className="p-4">
+                    <div className="text-sm text-zinc-400">Position Size</div>
+                    <div className="text-lg font-bold text-cyan-500">
+                      {demoStatus.position_size_pct || 10}%
                     </div>
                   </CardContent>
                 </Card>
@@ -687,6 +751,79 @@ export default function App() {
                   </ScrollArea>
                 </CardContent>
               </Card>
+            </div>
+
+            {/* Quick Demo Settings */}
+            <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/50">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-zinc-200">Quick Settings</h3>
+                <Button
+                  onClick={handleResetDemo}
+                  disabled={isDemoLoading}
+                  variant="outline"
+                  size="sm"
+                  className="border-zinc-700 text-zinc-400 hover:text-white text-xs"
+                >
+                  Reset Demo
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">Leverage</label>
+                  <select
+                    value={demoSettings.leverage}
+                    onChange={(e) => handleUpdateDemoSettings({ leverage: parseFloat(e.target.value) })}
+                    disabled={isDemoLoading}
+                    className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                  >
+                    <option value="1">1x</option>
+                    <option value="2">2x</option>
+                    <option value="5">5x</option>
+                    <option value="10">10x</option>
+                    <option value="25">25x</option>
+                    <option value="50">50x</option>
+                    <option value="100">100x</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">Position Size</label>
+                  <select
+                    value={demoSettings.position_size_pct}
+                    onChange={(e) => handleUpdateDemoSettings({ position_size_pct: parseInt(e.target.value) })}
+                    disabled={isDemoLoading}
+                    className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                  >
+                    <option value="5">5%</option>
+                    <option value="10">10%</option>
+                    <option value="25">25%</option>
+                    <option value="50">50%</option>
+                    <option value="100">100%</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">Capital</label>
+                  <select
+                    value={demoSettings.capital}
+                    onChange={(e) => handleUpdateDemoSettings({ capital: parseInt(e.target.value), reset_data: true })}
+                    disabled={isDemoLoading}
+                    className="w-full px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-zinc-200 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                  >
+                    <option value="50">$50</option>
+                    <option value="100">$100</option>
+                    <option value="250">$250</option>
+                    <option value="500">$500</option>
+                    <option value="1000">$1000</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="text-xs text-zinc-500">
+                Max Position: ${(demoSettings.capital * demoSettings.position_size_pct / 100 * demoSettings.leverage).toFixed(2)} USDT |
+                Effective Capital: ${(demoSettings.capital * demoSettings.leverage).toFixed(0)} USDT
+              </div>
             </div>
 
             <div className="text-center text-zinc-500 text-sm">

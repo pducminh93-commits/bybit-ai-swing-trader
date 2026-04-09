@@ -44,6 +44,8 @@ class DemoPosition:
 class DemoTradingService:
     def __init__(self):
         self.capital = 100.0  # USDT
+        self.leverage = 1.0  # Leverage multiplier
+        self.position_size_pct = 10.0  # Percentage of capital per position
         self.positions: Dict[str, DemoPosition] = {}
         self.history: List[dict] = []
         self.is_running = False
@@ -83,13 +85,28 @@ class DemoTradingService:
         """Get trade history"""
         return self.history.copy()
 
+    def update_settings(self, capital: Optional[float] = None, leverage: Optional[float] = None, position_size_pct: Optional[float] = None, reset_data: bool = False):
+        """Update demo settings"""
+        capital_changed = False
+        if capital is not None and capital != self.capital:
+            self.capital = capital
+            capital_changed = True
+
+        if leverage is not None:
+            self.leverage = max(1.0, min(100.0, leverage))
+
+        if position_size_pct is not None:
+            self.position_size_pct = max(1.0, min(100.0, position_size_pct))
+
+        if reset_data or capital_changed:
+            self.positions.clear()
+            self.history.clear()
+
     def calculate_position_size(self, entry_price: float) -> float:
-        """Calculate position size based on 2% risk per trade"""
-        risk_amount = self.capital * 0.02  # 2% of capital
-        # Assume 2% stop loss for position sizing
-        stop_loss_pct = 0.02
-        position_value = risk_amount / stop_loss_pct
-        return position_value / entry_price
+        """Calculate position size based on percentage of capital and leverage"""
+        position_value = self.capital * (self.position_size_pct / 100.0)
+        leveraged_value = position_value * self.leverage
+        return leveraged_value / entry_price
 
     def process_signals(self, signals: List[SignalResponse]):
         """Process signals from the signals API"""

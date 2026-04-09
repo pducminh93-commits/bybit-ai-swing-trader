@@ -305,6 +305,8 @@ async def get_demo_status():
             "is_running": demo_service.is_running,
             "balance": demo_service.get_balance(),
             "capital": demo_service.capital,
+            "leverage": demo_service.leverage,
+            "position_size_pct": demo_service.position_size_pct,
             "total_positions": len(demo_service.get_open_positions()),
             "total_trades": len(demo_service.get_trade_history())
         }
@@ -329,6 +331,27 @@ async def get_demo_history():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get history: {str(e)}")
 
+@app.post("/api/demo/settings")
+async def update_demo_settings(
+    capital: Optional[float] = None,
+    leverage: Optional[float] = None,
+    position_size_pct: Optional[float] = None,
+    reset_data: bool = False
+):
+    """Update demo trading settings"""
+    try:
+        demo_service.update_settings(capital, leverage, position_size_pct, reset_data)
+        return {
+            "status": "updated",
+            "settings": {
+                "capital": demo_service.capital,
+                "leverage": demo_service.leverage,
+                "position_size_pct": demo_service.position_size_pct
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update settings: {str(e)}")
+
 @app.post("/api/demo/reset")
 async def reset_demo_simulation():
     """Reset the demo trading simulation"""
@@ -337,6 +360,8 @@ async def reset_demo_simulation():
         demo_service.positions.clear()
         demo_service.history.clear()
         demo_service.capital = 100.0
+        demo_service.leverage = 1.0
+        demo_service.position_size_pct = 10.0
         return {"status": "reset", "message": "Demo simulation reset successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reset simulation: {str(e)}")
