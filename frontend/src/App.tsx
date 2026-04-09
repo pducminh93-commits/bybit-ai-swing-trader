@@ -6,7 +6,10 @@ import {
   RefreshCw,
   BarChart3,
   XCircle,
-  Settings
+  Settings,
+  Brain,
+  History,
+  Activity
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +27,8 @@ import {
   getDemoPositions,
   getDemoHistory,
   resetDemoSimulation,
+  trainMlModel,
+  runBacktest,
   DemoPosition,
   DemoTrade,
   DemoStatus
@@ -56,6 +61,18 @@ export default function App() {
     leverage: 1.0,
     position_size_pct: 10
   });
+
+  // Training state
+  const [trainingSymbol, setTrainingSymbol] = useState("BTCUSDT");
+  const [trainingModelType, setTrainingModelType] = useState("rf");
+  const [trainingResult, setTrainingResult] = useState<any>(null);
+  const [isTraining, setIsTraining] = useState(false);
+
+  // Backtest state
+  const [backtestSymbol, setBacktestSymbol] = useState("BTCUSDT");
+  const [backtestDays, setBacktestDays] = useState(30);
+  const [backtestResult, setBacktestResult] = useState<any>(null);
+  const [isBacktesting, setIsBacktesting] = useState(false);
 
   // Load settings from localStorage
   useEffect(() => {
@@ -277,6 +294,37 @@ export default function App() {
       loadDemoData();
     }
   }, [activeTab]);
+
+  // Training functions
+  const handleTrainModel = async () => {
+    if (!trainingSymbol) return;
+    setIsTraining(true);
+    setTrainingResult(null);
+    try {
+      const result = await trainMlModel(trainingSymbol, trainingModelType);
+      setTrainingResult(result);
+    } catch (err: any) {
+      console.error(err);
+      setError(`Failed to train model: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
+  const handleRunBacktest = async () => {
+    if (!backtestSymbol) return;
+    setIsBacktesting(true);
+    setBacktestResult(null);
+    try {
+      const result = await runBacktest(backtestSymbol, backtestDays);
+      setBacktestResult(result);
+    } catch (err: any) {
+      console.error(err);
+      setError(`Failed to run backtest: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setIsBacktesting(false);
+    }
+  };
 
   return (
   <div className="min-h-screen bg-[#050505] text-zinc-300 font-sans selection:bg-orange-500/30">
@@ -862,15 +910,224 @@ export default function App() {
         )}
 
         {activeTab === "training" && (
-          <div className="text-center space-y-4">
-            <h2 className="text-xl font-bold text-white">AI Training Center</h2>
-            <p className="text-zinc-500 text-sm max-w-md text-center">
-              Fine-tune the AI model with your own historical data and custom indicators.
-              Improve signal accuracy by training the engine on specific market conditions.
-            </p>
-            <Button variant="outline" className="border-zinc-800 text-zinc-400 hover:text-white">
-              COMING SOON
-            </Button>
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">AI Training & Backtesting Center</h2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Machine Learning Training */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Brain className="w-5 h-5" />
+                    Train ML Model
+                  </CardTitle>
+                  <CardDescription>Train a new Machine Learning model using recent market data</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-zinc-200">Symbol</label>
+                      <select
+                        value={trainingSymbol}
+                        onChange={(e) => setTrainingSymbol(e.target.value)}
+                        disabled={isTraining}
+                        className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      >
+                        {tickers.length > 0 ? (
+                          tickers.map(t => (
+                            <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
+                          ))
+                        ) : (
+                          <option value="BTCUSDT">BTCUSDT</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-zinc-200">Model Type</label>
+                      <select
+                        value={trainingModelType}
+                        onChange={(e) => setTrainingModelType(e.target.value)}
+                        disabled={isTraining}
+                        className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      >
+                        <option value="rf">Random Forest</option>
+                        <option value="gb">Gradient Boosting</option>
+                        <option value="ensemble">Ensemble</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={handleTrainModel}
+                    disabled={isTraining}
+                    className="w-full bg-orange-600 hover:bg-orange-700 text-white"
+                  >
+                    {isTraining ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Training Model...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 mr-2" />
+                        Start Training
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Training Results */}
+                  {trainingResult && (
+                    <div className="bg-zinc-800/50 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-zinc-400">Status</span>
+                        <Badge className="bg-green-500/20 text-green-500 border-green-500/30">
+                          {trainingResult.status}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-zinc-400">Accuracy</span>
+                        <span className="text-sm font-bold text-white">
+                          {(trainingResult.accuracy * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                      
+                      {trainingResult.feature_importance && (
+                        <div className="space-y-2 pt-2 border-t border-zinc-700">
+                          <span className="text-xs text-zinc-400 font-medium">Top Features</span>
+                          <div className="space-y-1">
+                            {Object.entries(trainingResult.feature_importance)
+                              .sort(([,a]: any, [,b]: any) => b - a)
+                              .slice(0, 3)
+                              .map(([feature, importance]: any) => (
+                                <div key={feature} className="flex items-center justify-between text-xs">
+                                  <span className="text-zinc-300">{feature.replace(/_/g, ' ')}</span>
+                                  <span className="text-zinc-500">{(importance * 100).toFixed(1)}%</span>
+                                </div>
+                              ))
+                            }
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Historical Backtesting */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <History className="w-5 h-5" />
+                    Historical Backtest
+                  </CardTitle>
+                  <CardDescription>Test the AI trading logic on historical data</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-zinc-200">Symbol</label>
+                      <select
+                        value={backtestSymbol}
+                        onChange={(e) => setBacktestSymbol(e.target.value)}
+                        disabled={isBacktesting}
+                        className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      >
+                        {tickers.length > 0 ? (
+                          tickers.map(t => (
+                            <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
+                          ))
+                        ) : (
+                          <option value="BTCUSDT">BTCUSDT</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-zinc-200">Timeframe (Days)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="90"
+                        value={backtestDays}
+                        onChange={(e) => setBacktestDays(parseInt(e.target.value) || 30)}
+                        disabled={isBacktesting}
+                        className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={handleRunBacktest}
+                    disabled={isBacktesting}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {isBacktesting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Running Backtest...
+                      </>
+                    ) : (
+                      <>
+                        <Activity className="w-4 h-4 mr-2" />
+                        Run Backtest
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Backtest Results */}
+                  {backtestResult && backtestResult.metrics && (
+                    <div className="bg-zinc-800/50 rounded-lg p-4 space-y-4">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <span className="text-xs text-zinc-500">Win Rate</span>
+                          <div className={`text-lg font-bold ${(backtestResult.metrics.win_rate || 0) >= 50 ? 'text-green-500' : 'text-red-500'}`}>
+                            {(backtestResult.metrics.win_rate || 0).toFixed(1)}%
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-zinc-500">Total Profit</span>
+                          <div className={`text-lg font-bold ${(backtestResult.metrics.total_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {(backtestResult.metrics.total_profit || 0) > 0 ? '+' : ''}{(backtestResult.metrics.total_profit || 0).toFixed(2)}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-zinc-500">Total Trades</span>
+                          <div className="text-sm font-medium text-white">
+                            {backtestResult.metrics.total_trades || 0} ({(backtestResult.metrics.winning_trades || 0)}W / {(backtestResult.metrics.losing_trades || 0)}L)
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-zinc-500">Profit Factor</span>
+                          <div className="text-sm font-medium text-white">
+                            {backtestResult.metrics.profit_factor === 'inf' ? 'INF' : typeof backtestResult.metrics.profit_factor === 'number' ? backtestResult.metrics.profit_factor.toFixed(2) : (backtestResult.metrics.profit_factor || 0)}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-zinc-500">Max Drawdown</span>
+                          <div className="text-sm font-medium text-red-400">
+                            {(backtestResult.metrics.max_drawdown || 0).toFixed(2)}%
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <span className="text-xs text-zinc-500">Avg Profit/Trade</span>
+                          <div className={`text-sm font-medium ${(backtestResult.metrics.avg_profit_per_trade || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {(backtestResult.metrics.avg_profit_per_trade || 0) > 0 ? '+' : ''}{(backtestResult.metrics.avg_profit_per_trade || 0).toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+            
+            <div className="text-center text-zinc-500 text-sm">
+              <p>Training generates new models based on historical patterns to improve prediction accuracy.</p>
+              <p>Backtesting simulates past trading performance over the specified time period.</p>
+            </div>
           </div>
         )}
 

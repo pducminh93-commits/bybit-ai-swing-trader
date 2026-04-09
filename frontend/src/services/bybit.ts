@@ -139,3 +139,17 @@ export const resetDemoSimulation = async (): Promise<{status: string; message: s
   const response = await axios.post("http://localhost:8000/api/demo/reset");
   return response.data;
 };
+
+export const trainMlModel = async (symbol: string, modelType: string = "rf"): Promise<any> => {
+  const response = await axios.post(`http://localhost:8000/api/ml/train/${symbol}`, null, {
+    params: { model_type: modelType }
+  });
+  return response.data;
+};
+
+export const runBacktest = async (symbol: string, days: number = 30): Promise<any> => {
+  const response = await axios.post(`http://localhost:8000/api/backtest/${symbol}`, null, {
+    params: { days }
+  });
+  return response.data;
+};
