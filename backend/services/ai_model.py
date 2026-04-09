@@ -57,6 +57,7 @@ class AISignalGenerator:
         reasons = []
         bullish_signals = 0
         bearish_signals = 0
+        entry_price = current_price  # Default to current price
 
         # RSI Analysis with hysteresis
         if indicators.get('rsi'):
@@ -331,7 +332,7 @@ class AISignalGenerator:
             'reason': '; '.join(reasons),
             'take_profit': tp,
             'stop_loss': sl,
-            'entry_price': entry_price
+            'entry_price': current_price  # Always use current price as entry price
         }
 
     def calculate_tp_sl(self, signal: str, current_price: float, indicators: Dict[str, Any]) -> tuple[float, float]:

@@ -1,4 +1,5 @@
 import requests
+import asyncio
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from services.ai_model import AISignalGenerator
 from services.multi_timeframe import MultiTimeframeAnalysis
 from services.ml_model import MLSignalPredictor
 from services.backtester import Backtester
+from services.demo_trading import demo_service
 from models.signal_model import SignalResponse
 from pydantic import BaseModel
 from typing import List, Optional
@@ -265,6 +267,79 @@ async def get_ml_prediction(symbol: str, model_type: str = "rf"):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ML prediction failed: {str(e)}")
+
+# Demo Trading Endpoints
+@app.post("/api/demo/start")
+async def start_demo_simulation():
+    """Start the demo trading simulation"""
+    try:
+        demo_service.start_simulation()
+        return {"status": "started", "message": "Demo simulation started successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start simulation: {str(e)}")
+
+@app.post("/api/demo/stop")
+async def stop_demo_simulation():
+    """Stop the demo trading simulation"""
+    try:
+        demo_service.stop_simulation()
+        return {"status": "stopped", "message": "Demo simulation stopped successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop simulation: {str(e)}")
+
+@app.post("/api/demo/process-signals")
+async def process_demo_signals(signals: List[SignalResponse]):
+    """Process signals for demo trading"""
+    try:
+        executed_trades = demo_service.process_signals(signals)
+        demo_service.update_positions()  # Update positions after processing signals
+        return {"executed_trades": executed_trades or [], "count": len(executed_trades or [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process signals: {str(e)}")
+
+@app.get("/api/demo/status")
+async def get_demo_status():
+    """Get demo trading status and balance"""
+    try:
+        return {
+            "is_running": demo_service.is_running,
+            "balance": demo_service.get_balance(),
+            "capital": demo_service.capital,
+            "total_positions": len(demo_service.get_open_positions()),
+            "total_trades": len(demo_service.get_trade_history())
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+@app.get("/api/demo/positions")
+async def get_demo_positions():
+    """Get all open demo positions"""
+    try:
+        positions = demo_service.get_open_positions()
+        return {"positions": positions, "count": len(positions)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get positions: {str(e)}")
+
+@app.get("/api/demo/history")
+async def get_demo_history():
+    """Get demo trading history"""
+    try:
+        history = demo_service.get_trade_history()
+        return {"history": history, "count": len(history)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get history: {str(e)}")
+
+@app.post("/api/demo/reset")
+async def reset_demo_simulation():
+    """Reset the demo trading simulation"""
+    try:
+        demo_service.stop_simulation()
+        demo_service.positions.clear()
+        demo_service.history.clear()
+        demo_service.capital = 100.0
+        return {"status": "reset", "message": "Demo simulation reset successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset simulation: {str(e)}")
 
 @app.get("/")
 async def root():

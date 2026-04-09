@@ -12,7 +12,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchTickers, fetchSignals } from "./services/bybit";
+import {
+  fetchTickers,
+  fetchSignals,
+  startDemoSimulation,
+  stopDemoSimulation,
+  processDemoSignals,
+  getDemoStatus,
+  getDemoPositions,
+  getDemoHistory,
+  resetDemoSimulation,
+  DemoPosition,
+  DemoTrade,
+  DemoStatus
+} from "./services/bybit";
 import { cn } from "@/lib/utils";
 
 export default function App() {
@@ -22,6 +35,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<"signals" | "demo" | "training">("signals");
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
+
+  // Demo trading state
+  const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
+  const [demoPositions, setDemoPositions] = useState<DemoPosition[]>([]);
+  const [demoHistory, setDemoHistory] = useState<DemoTrade[]>([]);
+  const [isDemoLoading, setIsDemoLoading] = useState(false);
 
   // Fetch tickers on mount and get top 10
   useEffect(() => {
@@ -52,6 +71,19 @@ export default function App() {
       const signalData = await fetchSignals(symbols);
       setSignals(signalData);
       setScanProgress(100);
+
+      // Auto-process signals for demo if demo is running
+      if (demoStatus?.is_running && signalData.length > 0) {
+        try {
+          const result = await processDemoSignals(signalData);
+          if (result.count > 0) {
+            // Refresh demo data after processing
+            loadDemoData();
+          }
+        } catch (demoErr) {
+          console.error("Failed to process demo signals:", demoErr);
+        }
+      }
     } catch (err) {
       console.error(err);
       setError("Failed to scan signals");
@@ -60,6 +92,73 @@ export default function App() {
       setScanProgress(0);
     }
   };
+
+  // Demo trading functions
+  const loadDemoData = async () => {
+    try {
+      const [status, positions, history] = await Promise.all([
+        getDemoStatus(),
+        getDemoPositions(),
+        getDemoHistory()
+      ]);
+      setDemoStatus(status);
+      setDemoPositions(positions.positions);
+      setDemoHistory(history.history);
+    } catch (err) {
+      console.error("Failed to load demo data:", err);
+    }
+  };
+
+  const handleStartDemo = async () => {
+    setIsDemoLoading(true);
+    try {
+      await startDemoSimulation();
+      const status = await getDemoStatus();
+      setDemoStatus(status);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to start demo simulation");
+    } finally {
+      setIsDemoLoading(false);
+    }
+  };
+
+  const handleStopDemo = async () => {
+    setIsDemoLoading(true);
+    try {
+      await stopDemoSimulation();
+      const status = await getDemoStatus();
+      setDemoStatus(status);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to stop demo simulation");
+    } finally {
+      setIsDemoLoading(false);
+    }
+  };
+
+  const handleResetDemo = async () => {
+    setIsDemoLoading(true);
+    try {
+      await resetDemoSimulation();
+      const status = await getDemoStatus();
+      setDemoStatus(status);
+      setDemoPositions([]);
+      setDemoHistory([]);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to reset demo simulation");
+    } finally {
+      setIsDemoLoading(false);
+    }
+  };
+
+  // Load demo data when tab is active
+  useEffect(() => {
+    if (activeTab === "demo") {
+      loadDemoData();
+    }
+  }, [activeTab]);
 
   return (
   <div className="min-h-screen bg-[#050505] text-zinc-300 font-sans selection:bg-orange-500/30">
@@ -154,8 +253,8 @@ export default function App() {
         {activeTab === "signals" && (
           <div className="border-t border-zinc-800/30 bg-black/20">
             <div className="container mx-auto px-4 h-14 flex items-center justify-end">
-              <Button 
-                onClick={handleScanAll} 
+              <Button
+                onClick={handleScanAll}
                 disabled={isScanning || tickers.length === 0}
                 className="bg-orange-500 hover:bg-orange-600 text-black font-black px-8 h-9 text-xs rounded-full shadow-lg shadow-orange-500/20 transition-all active:scale-95 flex items-center gap-2"
               >
@@ -174,6 +273,8 @@ export default function App() {
             </div>
           </div>
         )}
+
+
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-8">
@@ -223,25 +324,180 @@ export default function App() {
         )}
 
         {activeTab === "demo" && (
-          <div className="text-center space-y-4">
-            <h2 className="text-xl font-bold text-white">Market Overview</h2>
-            <ScrollArea className="h-96">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {tickers.map((ticker) => (
-                  <Card key={ticker.symbol} className="bg-zinc-900/50 border-zinc-800">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-white">{ticker.symbol}</CardTitle>
-                      <CardDescription>Price: {ticker.lastPrice}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-xs text-zinc-500">
-                        Volume: {ticker.volume24h}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Demo Trading Simulation</h2>
+              <div className="flex items-center gap-3">
+                <Button
+                  onClick={handleResetDemo}
+                  disabled={isDemoLoading}
+                  variant="outline"
+                  size="sm"
+                  className="border-zinc-700 text-zinc-300 hover:text-white hover:border-zinc-600"
+                >
+                  Reset
+                </Button>
+                {demoStatus?.is_running ? (
+                  <Button
+                    onClick={handleStopDemo}
+                    disabled={isDemoLoading}
+                    variant="destructive"
+                    size="sm"
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    Stop Simulation
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleStartDemo}
+                    disabled={isDemoLoading}
+                    className="bg-green-600 hover:bg-green-700"
+                    size="sm"
+                  >
+                    Start Simulation
+                  </Button>
+                )}
               </div>
-            </ScrollArea>
+            </div>
+
+            {/* Demo Status */}
+            {demoStatus && (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Card className="bg-zinc-900/50 border-zinc-800">
+                  <CardContent className="p-4">
+                    <div className="text-sm text-zinc-400">Balance</div>
+                    <div className="text-lg font-bold text-white">
+                      ${demoStatus.balance.toFixed(2)}
+                    </div>
+                    <div className="text-xs text-zinc-500">
+                      Capital: ${demoStatus.capital.toFixed(2)}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-zinc-900/50 border-zinc-800">
+                  <CardContent className="p-4">
+                    <div className="text-sm text-zinc-400">Open Positions</div>
+                    <div className="text-lg font-bold text-orange-500">
+                      {demoStatus.total_positions}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-zinc-900/50 border-zinc-800">
+                  <CardContent className="p-4">
+                    <div className="text-sm text-zinc-400">Total Trades</div>
+                    <div className="text-lg font-bold text-blue-500">
+                      {demoStatus.total_trades}
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-zinc-900/50 border-zinc-800">
+                  <CardContent className="p-4">
+                    <div className="text-sm text-zinc-400">Status</div>
+                    <div className={`text-lg font-bold ${demoStatus.is_running ? 'text-green-500' : 'text-red-500'}`}>
+                      {demoStatus.is_running ? 'Running' : 'Stopped'}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Open Positions */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5" />
+                    Open Positions ({demoPositions.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-80">
+                    {demoPositions.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-8">
+                        No open positions
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {demoPositions.map((position) => (
+                          <div key={position.symbol} className="bg-zinc-800/50 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white">{position.symbol}</span>
+                                <Badge
+                                  variant={position.side === 'LONG' ? 'default' : 'destructive'}
+                                  className={position.side === 'LONG' ? 'bg-green-600' : 'bg-red-600'}
+                                >
+                                  {position.side}
+                                </Badge>
+                              </div>
+                              <span className={`font-bold ${position.unrealized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                ${position.unrealized_pnl.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="text-xs text-zinc-400 space-y-1">
+                              <div>Entry: ${position.entry_price.toFixed(4)} | Current: ${position.current_price.toFixed(4)}</div>
+                              <div>Quantity: {position.quantity.toFixed(6)} | P&L: {position.pnl_percentage.toFixed(2)}%</div>
+                              <div>Entry Time: {new Date(position.entry_time).toLocaleString()}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+
+              {/* Trade History */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <RefreshCw className="w-5 h-5" />
+                    Trade History ({demoHistory.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-80">
+                    {demoHistory.length === 0 ? (
+                      <div className="text-center text-zinc-500 py-8">
+                        No trade history
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {demoHistory.slice().reverse().map((trade, index) => (
+                          <div key={index} className="bg-zinc-800/50 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white">{trade.symbol}</span>
+                                <Badge
+                                  variant={trade.side === 'LONG' ? 'default' : 'destructive'}
+                                  className={trade.side === 'LONG' ? 'bg-green-600' : 'bg-red-600'}
+                                >
+                                  {trade.side}
+                                </Badge>
+                              </div>
+                              <span className={`font-bold ${trade.realized_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                ${trade.realized_pnl.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="text-xs text-zinc-400 space-y-1">
+                              <div>Entry: ${trade.entry_price.toFixed(4)} | Exit: ${trade.exit_price.toFixed(4)}</div>
+                              <div>Quantity: {trade.quantity.toFixed(6)} | P&L: {trade.pnl_percentage.toFixed(2)}%</div>
+                              <div>Entry: {new Date(trade.entry_time).toLocaleString()}</div>
+                              <div>Exit: {new Date(trade.exit_time).toLocaleString()}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="text-center text-zinc-500 text-sm">
+              <p>Demo simulation uses 100 USDT capital and automatically executes signals with ≥60% confidence from Signals tab</p>
+              <p>Positions update automatically when scanning signals • Uses real Bybit market data</p>
+            </div>
           </div>
         )}
 
