@@ -84,8 +84,8 @@ class DemoTradingService:
         return self.history.copy()
 
     def calculate_position_size(self, entry_price: float) -> float:
-        """Calculate position size based on 10% risk per trade"""
-        risk_amount = self.capital * 0.1  # 10% of capital
+        """Calculate position size based on 2% risk per trade"""
+        risk_amount = self.capital * 0.02  # 2% of capital
         # Assume 2% stop loss for position sizing
         stop_loss_pct = 0.02
         position_value = risk_amount / stop_loss_pct
@@ -130,7 +130,7 @@ class DemoTradingService:
             if signal.signal in ['LONG', 'SHORT']:
                 entry_price = current_price
                 quantity = self.calculate_position_size(entry_price)
-                if quantity * entry_price <= self.capital * 0.5:  # Max 50% of capital per position
+                if quantity * entry_price <= self.capital * 1.0:  # Max 100% of capital per position
                     position = DemoPosition(
                         symbol=symbol,
                         side=signal.signal,
