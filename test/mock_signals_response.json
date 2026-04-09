@@ -1,10 +1,11 @@
 {
   "BTCUSDT": {
-    "signal": "BUY",
+    "signal": "LONG",
     "confidence": 0.85,
-    "reason": "RSI oversold (25.3), MACD bullish crossover, Price near lower Bollinger Band",
+    "reason": "RSI oversold (25.3), MACD bullish crossover, Price near lower Bollinger Band, Entry signal confirmed (3 indicators aligned)",
     "take_profit": 45250.0,
     "stop_loss": 41800.0,
+    "entry_price": 42000.0,
     "indicators": {
       "rsi": 25.3,
       "macd": -45.2,
@@ -16,11 +17,12 @@
     "timestamp": "2026-04-08T23:35:46Z"
   },
   "ETHUSDT": {
-    "signal": "SELL",
+    "signal": "SHORT",
     "confidence": 0.72,
-    "reason": "RSI overbought (78.9), Bearish Ichimoku cloud, Price above upper Bollinger Band",
+    "reason": "RSI overbought (78.9), Bearish Ichimoku cloud, Price above upper Bollinger Band, Entry signal confirmed (2 indicators aligned)",
     "take_profit": 2850.0,
     "stop_loss": 3100.0,
+    "entry_price": 3000.0,
     "indicators": {
       "rsi": 78.9,
       "macd": 12.5,
@@ -32,9 +34,9 @@
     "timestamp": "2026-04-08T23:35:46Z"
   },
   "SOLUSDT": {
-    "signal": "HOLD",
-    "confidence": 0.45,
-    "reason": "Mixed signals, ADX weak trend (18.5), No clear direction",
+    "signal": "EXIT",
+    "confidence": 0.35,
+    "reason": "Weak or conflicting signals, consider exit",
     "take_profit": 0.0,
     "stop_loss": 0.0,
     "indicators": {

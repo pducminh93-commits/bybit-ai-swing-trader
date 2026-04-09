@@ -187,8 +187,16 @@ export default function App() {
                     <CardTitle className="text-white flex items-center justify-between">
                       {signal.symbol}
                       <Badge
-                        variant={signal.signal === 'BUY' ? 'default' : signal.signal === 'SELL' ? 'destructive' : 'secondary'}
-                        className={signal.signal === 'BUY' ? 'bg-green-500' : signal.signal === 'SELL' ? 'bg-red-500' : ''}
+                        variant={
+                          signal.signal === 'LONG' ? 'default' :
+                          signal.signal === 'SHORT' ? 'destructive' :
+                          signal.signal === 'EXIT' ? 'outline' : 'secondary'
+                        }
+                        className={
+                          signal.signal === 'LONG' ? 'bg-green-500' :
+                          signal.signal === 'SHORT' ? 'bg-red-500' :
+                          signal.signal === 'EXIT' ? 'border-yellow-500 text-yellow-500' : ''
+                        }
                       >
                         {signal.signal}
                       </Badge>
@@ -198,6 +206,12 @@ export default function App() {
                   <CardContent className="space-y-2">
                     <p className="text-sm text-zinc-400">{signal.reason}</p>
                     <div className="text-xs text-zinc-500 space-y-1">
+                      {signal.entry_price && signal.signal === 'LONG' && (
+                        <div>Entry: {signal.entry_price}</div>
+                      )}
+                      {signal.entry_price && signal.signal === 'SHORT' && (
+                        <div>Entry: {signal.entry_price}</div>
+                      )}
                       <div>TP: {signal.take_profit}</div>
                       <div>SL: {signal.stop_loss}</div>
                     </div>

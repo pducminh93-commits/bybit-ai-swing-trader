@@ -90,6 +90,7 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
                 reason=aggregated_signal['reason'],
                 take_profit=tp_sl[0],
                 stop_loss=tp_sl[1],
+                entry_price=aggregated_signal.get('entry_price'),
                 indicators=indicators,
                 timestamp=datetime.utcnow().isoformat()
             )
@@ -105,7 +106,7 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
             current_price = ta.get_latest_price()
 
             ai_generator = AISignalGenerator()
-            signal_data = ai_generator.generate_signal(indicators, current_price)
+            signal_data = ai_generator.generate_signal(indicators, current_price, symbol)
 
             return SignalResponse(
                 symbol=symbol,
@@ -114,6 +115,7 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
                 reason=signal_data['reason'],
                 take_profit=signal_data['take_profit'],
                 stop_loss=signal_data['stop_loss'],
+                entry_price=signal_data.get('entry_price'),
                 indicators=indicators,
                 timestamp=datetime.utcnow().isoformat()
             )
@@ -202,7 +204,7 @@ async def run_backtest(symbol: str, days: int = 30):
             current_price = ta.get_latest_price()
 
             ai_gen = AISignalGenerator()
-            signal = ai_gen.generate_signal(indicators, current_price)
+            signal = ai_gen.generate_signal(indicators, current_price, symbol)
 
             signals_data.append({
                 'timestamp': kline[0],

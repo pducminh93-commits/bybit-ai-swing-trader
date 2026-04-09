@@ -66,7 +66,7 @@ class Backtester:
 
     def _execute_signal(self, signal: str, price: float, timestamp: str, signal_data: Dict[str, Any]):
         """Execute buy/sell signal"""
-        if signal == 'BUY' and self.position <= 0:
+        if signal == 'LONG' and self.position <= 0:
             # Close short position if any
             if self.position == -1:
                 profit = (self.entry_price - price) * abs(self.position)  # Short profit
@@ -89,14 +89,14 @@ class Backtester:
             self.balance -= position_size * price * self.commission  # Fee
 
             self.trades.append({
-                'type': 'BUY',
+                'type': 'LONG',
                 'price': price,
                 'size': position_size,
                 'timestamp': timestamp,
                 'reason': signal_data.get('reason', '')
             })
 
-        elif signal == 'SELL' and self.position >= 0:
+        elif signal == 'SHORT' and self.position >= 0:
             # Close long position if any
             if self.position == 1:
                 profit = (price - self.entry_price) * abs(self.position)  # Long profit
@@ -119,12 +119,44 @@ class Backtester:
             self.balance -= position_size * price * self.commission  # Fee
 
             self.trades.append({
-                'type': 'SELL',
+                'type': 'SHORT',
                 'price': price,
                 'size': position_size,
                 'timestamp': timestamp,
                 'reason': signal_data.get('reason', '')
             })
+
+        elif signal == 'EXIT' and self.position != 0:
+            # Close any open position
+            if self.position == 1:  # Close long
+                profit = (price - self.entry_price) * abs(self.position)
+                profit_after_fee = profit * (1 - self.commission)
+                self.balance += profit_after_fee
+
+                self.trades.append({
+                    'type': 'CLOSE_LONG',
+                    'entry_price': self.entry_price,
+                    'exit_price': price,
+                    'profit': profit_after_fee,
+                    'timestamp': timestamp,
+                    'reason': 'EXIT signal'
+                })
+            elif self.position == -1:  # Close short
+                profit = (self.entry_price - price) * abs(self.position)
+                profit_after_fee = profit * (1 - self.commission)
+                self.balance += profit_after_fee
+
+                self.trades.append({
+                    'type': 'CLOSE_SHORT',
+                    'entry_price': self.entry_price,
+                    'exit_price': price,
+                    'profit': profit_after_fee,
+                    'timestamp': timestamp,
+                    'reason': 'EXIT signal'
+                })
+
+            self.position = 0
+            self.entry_price = 0
 
     def _calculate_metrics(self) -> Dict[str, Any]:
         """Calculate performance metrics"""
@@ -132,7 +164,7 @@ class Backtester:
             return {'total_trades': 0}
 
         # Basic metrics
-        total_trades = len([t for t in self.trades if t['type'] in ['BUY', 'SELL']])
+        total_trades = len([t for t in self.trades if t['type'] in ['BUY', 'SELL', 'LONG', 'SHORT']])
         winning_trades = len([t for t in self.trades if t.get('profit', 0) > 0])
         losing_trades = len([t for t in self.trades if t.get('profit', 0) < 0])
 
