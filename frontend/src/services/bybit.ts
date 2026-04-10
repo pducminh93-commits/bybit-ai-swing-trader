@@ -147,6 +147,11 @@ export const trainMlModel = async (symbol: string, modelType: string = "rf"): Pr
   return response.data;
 };
 
+export const trainUniversalModel = async (): Promise<any> => {
+  const response = await axios.post(`http://localhost:8000/api/ml/train-universal`);
+  return response.data;
+};
+
 export const runBacktest = async (symbol: string, days: number = 30): Promise<any> => {
   const response = await axios.post(`http://localhost:8000/api/backtest/${symbol}`, null, {
     params: { days }

@@ -4,6 +4,11 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
 import json
 import os
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class Backtester:
     def __init__(self, initial_balance: float = 100, commission: float = 0.001, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
@@ -33,6 +38,7 @@ class Backtester:
         self.last_open_candle = -self.min_hold_candles  # To allow first trade
 
     def run_backtest(self, signals_data: List[Dict[str, Any]], price_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        logger.info(f"Starting backtest with {len(signals_data)} signals and {len(price_data)} price points")
         """Run backtest on signals and price data"""
         self.reset()
 
@@ -253,6 +259,10 @@ class Backtester:
             self.entry_price = 0
 
     def _calculate_metrics(self) -> Dict[str, Any]:
+        """Calculate performance metrics"""
+        if not self.trades:
+            logger.warning("No trades to calculate metrics")
+            return {'total_trades': 0}
         """Calculate performance metrics"""
         if not self.trades:
             return {'total_trades': 0}

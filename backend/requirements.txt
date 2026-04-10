@@ -9,3 +9,7 @@ tensorflow
 bybit-api
 python-dotenv
 pydantic
+pytest
+mypy
+flake8
+black

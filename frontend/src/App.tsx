@@ -28,6 +28,7 @@ import {
   getDemoHistory,
   resetDemoSimulation,
   trainMlModel,
+  trainUniversalModel,
   runBacktest,
   DemoPosition,
   DemoTrade,
@@ -306,6 +307,25 @@ export default function App() {
     } catch (err: any) {
       console.error(err);
       setError(`Failed to train model: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setIsTraining(false);
+    }
+  };
+
+  const handleTrainUniversalModel = async () => {
+    setIsTraining(true);
+    setTrainingResult(null);
+    try {
+      const result = await trainUniversalModel();
+      setTrainingResult({
+        status: result.status,
+        accuracy: result.accuracy || 0,
+        feature_importance: result.feature_importance || null,
+        message: result.message
+      });
+    } catch (err: any) {
+      console.error(err);
+      setError(`Failed to train universal model: ${err.response?.data?.detail || err.message}`);
     } finally {
       setIsTraining(false);
     }
@@ -923,60 +943,37 @@ export default function App() {
                     <Brain className="w-5 h-5" />
                     Train ML Model
                   </CardTitle>
-                  <CardDescription>Train a new Machine Learning model using recent market data</CardDescription>
+                  <CardDescription>Auto-train AI on top market data to adapt to current conditions</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-zinc-200">Symbol</label>
-                      <select
-                        value={trainingSymbol}
-                        onChange={(e) => setTrainingSymbol(e.target.value)}
-                        disabled={isTraining}
-                        className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      >
-                        {tickers.length > 0 ? (
-                          tickers.map(t => (
-                            <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
-                          ))
-                        ) : (
-                          <option value="BTCUSDT">BTCUSDT</option>
-                        )}
-                      </select>
+                  <div className="flex flex-col gap-4">
+                    <div className="bg-zinc-800/30 p-4 rounded-lg border border-zinc-800 text-sm text-zinc-400">
+                      <p className="mb-2"><strong>Smart Training Pipeline:</strong></p>
+                      <ul className="list-disc pl-4 space-y-1">
+                        <li>Fetches latest 4-month data of Top 5 liquidity coins.</li>
+                        <li>Generates 20 institutional-grade features (Funding Rate, OI, CMF, etc).</li>
+                        <li>Trains an advanced Ensemble Model (Random Forest + Gradient Boosting).</li>
+                        <li>Creates a Universal Brain capable of predicting any coin's trend.</li>
+                      </ul>
                     </div>
-
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-zinc-200">Model Type</label>
-                      <select
-                        value={trainingModelType}
-                        onChange={(e) => setTrainingModelType(e.target.value)}
-                        disabled={isTraining}
-                        className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                      >
-                        <option value="rf">Random Forest</option>
-                        <option value="gb">Gradient Boosting</option>
-                        <option value="ensemble">Ensemble</option>
-                      </select>
-                    </div>
+                    <Button
+                      onClick={handleTrainUniversalModel}
+                      disabled={isTraining}
+                      className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white shadow-lg shadow-orange-500/20 h-14 text-base font-black tracking-widest uppercase"
+                    >
+                      {isTraining ? (
+                        <>
+                          <RefreshCw className="w-6 h-6 mr-3 animate-spin" />
+                          TRAINING AI MODEL (PLEASE WAIT ~30S)...
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="w-6 h-6 mr-3" />
+                          START AI TRAINING
+                        </>
+                      )}
+                    </Button>
                   </div>
-
-                  <Button
-                    onClick={handleTrainModel}
-                    disabled={isTraining}
-                    className="w-full bg-orange-600 hover:bg-orange-700 text-white"
-                  >
-                    {isTraining ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Training Model...
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 mr-2" />
-                        Start Training
-                      </>
-                    )}
-                  </Button>
 
                   {/* Training Results */}
                   {trainingResult && (
