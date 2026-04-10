@@ -6,24 +6,31 @@ import json
 import os
 
 class Backtester:
-    def __init__(self, initial_balance: float = 10000, commission: float = 0.001):
+    def __init__(self, initial_balance: float = 100, commission: float = 0.001, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
         """
         Initialize backtester
         initial_balance: Starting balance in USD
         commission: Trading fee (0.001 = 0.1%)
+        leverage: Leverage for futures trading (1.0 = spot)
+        min_hold_candles: Minimum candles to hold position before allowing opposite signal (6 = 24h for 4h candles)
+        stop_loss_pct: Stop loss percentage (0.05 = 5%)
         """
         self.initial_balance = initial_balance
         self.commission = commission
+        self.leverage = leverage
+        self.min_hold_candles = min_hold_candles
+        self.stop_loss_pct = stop_loss_pct
         self.reset()
 
     def reset(self):
         """Reset backtester state"""
         self.balance = self.initial_balance
-        self.position = 0  # 0: no position, 1: long, -1: short
+        self.position = 0  # position size: positive long, negative short, 0 none
         self.entry_price = 0
         self.trades = []
         self.equity_curve = []
         self.current_time = None
+        self.last_open_candle = -self.min_hold_candles  # To allow first trade
 
     def run_backtest(self, signals_data: List[Dict[str, Any]], price_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Run backtest on signals and price data"""
@@ -32,7 +39,7 @@ class Backtester:
         # Create price lookup by timestamp
         price_lookup = {d['timestamp']: d['close'] for d in price_data}
 
-        for signal in signals_data:
+        for idx, signal in enumerate(signals_data):
             timestamp = signal['timestamp']
             price = price_lookup.get(timestamp)
 
@@ -44,14 +51,55 @@ class Backtester:
             confidence = signal.get('confidence', 0)
 
             # Execute signal if confidence > threshold
-            if confidence > 0.6:
-                self._execute_signal(signal_type, price, timestamp, signal)
+            if confidence > 0.4:
+                self._execute_signal(signal_type, price, timestamp, signal, idx)
 
             # Update equity curve
+            position_value = abs(self.position) * price if self.position != 0 else 0
             self.equity_curve.append({
                 'timestamp': timestamp,
-                'equity': self.balance + (self.position * price if self.position != 0 else 0)
+                'equity': self.balance + position_value
             })
+
+            # Check stop loss
+            if self.position != 0:
+                if self.position > 0:  # Long position
+                    loss_pct = (self.entry_price - price) / self.entry_price
+                else:  # Short position
+                    loss_pct = (price - self.entry_price) / self.entry_price
+                if loss_pct >= self.stop_loss_pct:
+                    self._close_position(price, timestamp, 'Stop Loss')
+
+        # Đóng toàn bộ lệnh đang mở ở cây nến cuối cùng để tính toán PnL thực tế
+        if self.position != 0 and len(price_data) > 0:
+            last_timestamp = price_data[-1]['timestamp']
+            last_price = price_data[-1]['close']
+            
+            if self.position == 1:
+                profit = (last_price - self.entry_price) * abs(self.position)
+                profit_after_fee = profit * (1 - self.commission)
+                self.balance += profit_after_fee
+                self.trades.append({
+                    'type': 'CLOSE_LONG',
+                    'entry_price': self.entry_price,
+                    'exit_price': last_price,
+                    'profit': profit_after_fee,
+                    'timestamp': last_timestamp,
+                    'reason': 'End of Backtest'
+                })
+            elif self.position == -1:
+                profit = (self.entry_price - last_price) * abs(self.position)
+                profit_after_fee = profit * (1 - self.commission)
+                self.balance += profit_after_fee
+                self.trades.append({
+                    'type': 'CLOSE_SHORT',
+                    'entry_price': self.entry_price,
+                    'exit_price': last_price,
+                    'profit': profit_after_fee,
+                    'timestamp': last_timestamp,
+                    'reason': 'End of Backtest'
+                })
+            self.position = 0
 
         # Calculate performance metrics
         metrics = self._calculate_metrics()
@@ -64,11 +112,51 @@ class Backtester:
             'metrics': metrics
         }
 
-    def _execute_signal(self, signal: str, price: float, timestamp: str, signal_data: Dict[str, Any]):
+    def _close_position(self, price: float, timestamp: str, reason: str):
+        """Close current position"""
+        if self.position == 0:
+            return
+
+        if self.position > 0:  # Close long
+            profit = (price - self.entry_price) * self.position
+            profit_after_fee = profit * (1 - self.commission)
+            self.balance += profit_after_fee
+            self.trades.append({
+                'type': 'CLOSE_LONG',
+                'entry_price': self.entry_price,
+                'exit_price': price,
+                'profit': profit_after_fee,
+                'timestamp': timestamp,
+                'reason': reason
+            })
+        else:  # Close short
+            profit = (self.entry_price - price) * (-self.position)
+            profit_after_fee = profit * (1 - self.commission)
+            self.balance += profit_after_fee
+            self.trades.append({
+                'type': 'CLOSE_SHORT',
+                'entry_price': self.entry_price,
+                'exit_price': price,
+                'profit': profit_after_fee,
+                'timestamp': timestamp,
+                'reason': reason
+            })
+
+        self.position = 0
+        self.entry_price = 0
+
+    def _execute_signal(self, signal: str, price: float, timestamp: str, signal_data: Dict[str, Any], candle_idx: int):
         """Execute buy/sell signal"""
-        if signal == 'LONG' and self.position <= 0:
+        # Hỗ trợ cả BUY/SELL và LONG/SHORT
+        normalized_signal = 'LONG' if signal in ['BUY', 'LONG'] else ('SHORT' if signal in ['SELL', 'SHORT'] else signal)
+
+        if normalized_signal == 'LONG' and self.position <= 0:
+            # Check min hold time for opposite position
+            if self.position < 0 and candle_idx - self.last_open_candle < self.min_hold_candles:
+                return  # Skip signal to prevent flip
+
             # Close short position if any
-            if self.position == -1:
+            if self.position < 0:
                 profit = (self.entry_price - price) * abs(self.position)  # Short profit
                 profit_after_fee = profit * (1 - self.commission)
                 self.balance += profit_after_fee
@@ -83,8 +171,8 @@ class Backtester:
                 })
 
             # Open long position
-            position_size = self.balance / price * (1 - self.commission)
-            self.position = 1
+            position_size = (self.balance * self.leverage) / price * (1 - self.commission)
+            self.position = position_size  # Store actual size
             self.entry_price = price
             self.balance -= position_size * price * self.commission  # Fee
 
@@ -95,10 +183,15 @@ class Backtester:
                 'timestamp': timestamp,
                 'reason': signal_data.get('reason', '')
             })
+            self.last_open_candle = candle_idx
 
-        elif signal == 'SHORT' and self.position >= 0:
+        elif normalized_signal == 'SHORT' and self.position >= 0:
+            # Check min hold time for opposite position
+            if self.position > 0 and candle_idx - self.last_open_candle < self.min_hold_candles:
+                return  # Skip signal to prevent flip
+
             # Close long position if any
-            if self.position == 1:
+            if self.position > 0:
                 profit = (price - self.entry_price) * abs(self.position)  # Long profit
                 profit_after_fee = profit * (1 - self.commission)
                 self.balance += profit_after_fee
@@ -113,8 +206,8 @@ class Backtester:
                 })
 
             # Open short position
-            position_size = self.balance / price * (1 - self.commission)
-            self.position = -1
+            position_size = (self.balance * self.leverage) / price * (1 - self.commission)
+            self.position = -position_size  # Store actual size
             self.entry_price = price
             self.balance -= position_size * price * self.commission  # Fee
 
@@ -125,6 +218,7 @@ class Backtester:
                 'timestamp': timestamp,
                 'reason': signal_data.get('reason', '')
             })
+            self.last_open_candle = candle_idx
 
         elif signal == 'EXIT' and self.position != 0:
             # Close any open position
@@ -213,7 +307,7 @@ class Backtester:
             'sharpe_ratio': sharpe_ratio,
             'sortino_ratio': sortino_ratio,
             'max_drawdown': max_dd,
-            'profit_factor': abs(sum([p for p in profits if p > 0]) / sum([p for p in profits if p < 0])) if sum([p for p in profits if p < 0]) != 0 else float('inf')
+            'profit_factor': abs(sum([p for p in profits if p > 0]) / sum([p for p in profits if p < 0])) if sum([p for p in profits if p < 0]) != 0 else 'inf'
         }
 
     def save_results(self, results: Dict[str, Any], filename: str):

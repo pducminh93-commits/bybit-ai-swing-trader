@@ -97,29 +97,41 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
                 timestamp=datetime.utcnow().isoformat()
             )
         else:
-            # Original single timeframe analysis
-            kline_data = BybitService.fetch_klines(symbol, interval="240", limit=200)
-            if kline_data.get("retCode") != 0:
-                raise HTTPException(status_code=400, detail=kline_data.get("retMsg", "Failed to fetch klines"))
-
-            klines = kline_data["result"]["list"]
-            ta = TechnicalAnalysis(klines)
-            indicators = ta.calculate_indicators()
-            current_price = ta.get_latest_price()
-
-            ai_generator = AISignalGenerator()
-            signal_data = ai_generator.generate_signal(indicators, current_price, symbol)
-
+            # SỬ DỤNG HỆ THỐNG AI MỚI NHẤT: Universal Ensemble + Risk Manager
+            from services.signal_integrator import AdvancedSignalIntegrator
+            
+            integrator = AdvancedSignalIntegrator(symbol)
+            result = integrator.generate_actionable_signal()
+            
+            if "status" in result and result["status"] == "error":
+                raise HTTPException(status_code=400, detail=result.get("message"))
+                
+            trade_decision = result["trade_decision"]
+            raw_signal = result["raw_signal"]
+            ai_confidence = result["ai_confidence"]
+            
+            # Nếu Risk Manager quyết định SKIP, ta trả về tín hiệu HOLD (bỏ qua lệnh)
+            if trade_decision["action"] == "SKIP":
+                final_signal = "HOLD"
+                reason = trade_decision.get("reason", "Skipped by Risk Manager")
+                tp = 0.0
+                sl = 0.0
+            else:
+                final_signal = trade_decision["signal"]
+                reason = trade_decision.get("notes", f"Execute {final_signal}")
+                tp = trade_decision["take_profit"]
+                sl = trade_decision["stop_loss"]
+                
             return SignalResponse(
                 symbol=symbol,
-                signal=signal_data['signal'],
-                confidence=signal_data['confidence'],
-                reason=signal_data['reason'],
-                take_profit=signal_data['take_profit'],
-                stop_loss=signal_data['stop_loss'],
-                entry_price=signal_data.get('entry_price'),
-                indicators=indicators,
-                timestamp=datetime.utcnow().isoformat()
+                signal=final_signal,
+                confidence=ai_confidence,
+                reason=reason,
+                take_profit=tp,
+                stop_loss=sl,
+                entry_price=result["latest_price"],
+                indicators=result["features"],
+                timestamp=result["timestamp"] or datetime.utcnow().isoformat()
             )
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error generating signal: {str(e)}")
@@ -143,6 +155,38 @@ async def get_multiple_signals(symbols: Optional[str] = None) -> List[SignalResp
             continue
 
     return signals
+
+@app.post("/api/ml/train-universal")
+async def train_universal_model(symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,DOGEUSDT"):
+    """Train Universal/Global ML model for multiple symbols (Siêu tập dữ liệu)"""
+    try:
+        import asyncio
+        from services.retrainer import WalkForwardTrainer
+        
+        symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+        if not symbol_list:
+            raise HTTPException(status_code=400, detail="Symbols list cannot be empty")
+            
+        trainer = WalkForwardTrainer(symbols=symbol_list)
+        
+        # Chạy tác vụ huấn luyện nặng trong ThreadPool để không làm treo Web Server
+        result_dict = await asyncio.to_thread(trainer.retrain_universal_model)
+        
+        if result_dict and isinstance(result_dict, dict) and result_dict.get("status") == "success":
+            return {
+                "status": "success", 
+                "message": f"Universal Ensemble Model trained successfully on {len(symbol_list)} symbols",
+                "symbols_used": symbol_list,
+                "accuracy": result_dict.get("accuracy", 0),
+                "feature_importance": result_dict.get("feature_importance", {})
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Universal training failed. Check logs for details.")
+            
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Universal Training error: {str(e)}")
 
 @app.post("/api/ml/train/{symbol}")
 async def train_ml_model(symbol: str, model_type: str = "rf"):
@@ -186,52 +230,118 @@ async def train_ml_model(symbol: str, model_type: str = "rf"):
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
 @app.post("/api/backtest/{symbol}")
-async def run_backtest(symbol: str, days: int = 30):
+async def run_backtest(symbol: str, days: int = 30, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
     """Run backtest on historical data"""
     try:
-        # Fetch historical data
-        kline_data = BybitService.fetch_klines(symbol, interval="240", limit=days*6)  # 6 candles per day
-        if kline_data.get("retCode") != 0:
-            raise HTTPException(status_code=400, detail="Failed to fetch historical data")
-
-        klines = kline_data["result"]["list"]
-
-        # Generate signals for each period
-        signals_data = []
-        price_data = []
-
-        for kline in klines:
-            ta = TechnicalAnalysis([kline])
-            indicators = ta.calculate_indicators()
-            current_price = ta.get_latest_price()
-
-            ai_gen = AISignalGenerator()
-            signal = ai_gen.generate_signal(indicators, current_price, symbol)
-
-            signals_data.append({
-                'timestamp': kline[0],
-                'signal': signal['signal'],
-                'confidence': signal['confidence'],
-                'reason': signal['reason']
-            })
-
-            price_data.append({
-                'timestamp': kline[0],
-                'close': current_price
-            })
-
-        # Run backtest
-        backtester = Backtester()
-        results = backtester.run_backtest(signals_data, price_data)
-
-        # Save results
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        backtester.save_results(results, f"{symbol}_{timestamp}")
-
-        return results
-
+        import asyncio
+        # Chạy logic backtest nặng trong ThreadPool để không block server
+        result = await asyncio.to_thread(_run_backtest_sync, symbol, days, leverage, min_hold_candles)
+        return result
     except Exception as e:
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
+
+def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
+    # Fetch historical data (tăng limit lên để lấy đủ lịch sử tính toán)
+    kline_data = BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000))  # 6 candles per day + 100 for indicators buffer
+    if kline_data.get("retCode") != 0:
+        raise ValueError("Failed to fetch historical data")
+
+    klines = kline_data["result"]["list"][::-1] # Đảo ngược từ quá khứ -> hiện tại
+    
+    # CỐ GẮNG KÉO THÊM DỮ LIỆU OI & FUNDING (MAX 200 CỦA BYBIT) CHO BACKTEST UNIVERSAL MODEL
+    try:
+        oi_data = BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500).get('result', {}).get('list', [])
+        fr_data = BybitService.fetch_funding_rate_history(symbol, limit=500).get('result', {}).get('list', [])
+    except:
+        oi_data = []
+        fr_data = []
+
+    # Generate signals for each period
+    signals_data = []
+    price_data = []
+
+    from services.ml_model import MLSignalPredictor
+    from services.feature_engineering import FeatureEngineer
+    
+    predictor = MLSignalPredictor()
+    has_model = predictor._load_model(symbol)
+
+    start_idx = 50
+    if len(klines) <= start_idx:
+        raise ValueError("Not enough historical data for backtesting")
+
+    # TỐI ƯU HÓA: Tính toán FeatureEngineer 1 LẦN DUY NHẤT cho toàn bộ chuỗi thời gian
+    is_universal = has_model and len(predictor.feature_columns) == 20
+    master_df = None
+    
+    if is_universal:
+        eng = FeatureEngineer(klines, oi_data, fr_data)
+        master_df = eng.generate_all_features()
+        # Chuyển index (datetime) thành chuỗi milliseconds (str) để tra cứu
+        if not master_df.empty:
+            import pandas as pd
+            # Chuyển đổi an toàn từ DatetimeIndex -> int64 (nanoseconds) -> int (milliseconds) -> str
+            # pd.to_numeric() chuyển DatetimeIndex về int64 (ns). Nên cần chia cho 10**6 (1 triệu) để về ms
+            master_df.index = (pd.to_numeric(master_df.index) // 10**6).astype(str)
+
+    for i in range(start_idx, len(klines)):
+        current_kline = klines[i]
+        timestamp = current_kline[0]
+        current_price = float(current_kline[4])
+        
+        indicators = {}
+        if is_universal and master_df is not None:
+            # Look up features pre-calculated for this specific timestamp
+            if timestamp in master_df.index:
+                indicators = master_df.loc[timestamp].to_dict()
+            else:
+                # Fallback if timestamp missing due to DropNA
+                history_window = klines[max(0, i-100):i+1] 
+                ta = TechnicalAnalysis(history_window)
+                indicators = ta.calculate_indicators()
+        else:
+            # NẾU LÀ LOCAL MODEL CŨ (Hoặc chưa có)
+            history_window = klines[max(0, i-100):i+1] 
+            ta = TechnicalAnalysis(history_window)
+            indicators = ta.calculate_indicators()
+
+        # Gọi não bộ ML (Nếu đã train) hoặc Logic cũ
+        if has_model:
+            price_changes_mock = [0.0]*10
+            pred = predictor.predict_signal(indicators, price_changes_mock, 0.0, symbol)
+            final_signal = pred.get('signal', 'HOLD')
+            confidence = pred.get('confidence', 0.5)
+            reason = pred.get('reason', 'ML Prediction')
+        else:
+            ai_gen = AISignalGenerator()
+            signal_out = ai_gen.generate_signal(indicators, current_price, symbol)
+            final_signal = signal_out['signal']
+            confidence = signal_out['confidence']
+            reason = signal_out['reason']
+
+        signals_data.append({
+            'timestamp': timestamp,
+            'signal': final_signal,
+            'confidence': confidence,
+            'reason': reason
+        })
+
+        price_data.append({
+            'timestamp': timestamp,
+            'close': current_price
+        })
+
+    # Run backtest
+    backtester = Backtester(initial_balance=100, leverage=leverage, min_hold_candles=min_hold_candles, stop_loss_pct=stop_loss_pct)
+    results = backtester.run_backtest(signals_data, price_data)
+
+    # Save results
+    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    backtester.save_results(results, f"{symbol}_{timestamp_str}")
+
+    return results
 
 @app.get("/api/ml/predict/{symbol}")
 async def get_ml_prediction(symbol: str, model_type: str = "rf"):
