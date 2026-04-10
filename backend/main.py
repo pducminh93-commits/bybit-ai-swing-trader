@@ -41,11 +41,11 @@ async def get_kline(
     limit: int = 200
 ) -> dict:
     try:
-        data = BybitService.fetch_klines(symbol, interval, limit)
+        data = await BybitService.fetch_klines(symbol, interval, limit)
         if data.get("retCode") != 0:
             raise HTTPException(status_code=400, detail=data.get("retMsg", "Failed to fetch klines"))
         return data
-    except requests.RequestException as e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bybit API error: {str(e)}")
 
 @app.get("/api/bybit/tickers")
@@ -230,17 +230,40 @@ async def train_ml_model(symbol: str, model_type: str = "rf"):
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
 @app.post("/api/backtest/{symbol}")
-async def run_backtest(symbol: str, days: int = 30, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
-    """Run backtest on historical data"""
+async def run_backtest(symbol: str, days: int = 30, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05, async_task: bool = False):
+    """Run backtest on historical data. Use async_task=True for background processing."""
     try:
+        if async_task:
+            from tasks import run_backtest as backtest_task
+            task = backtest_task.delay(symbol, days, leverage, min_hold_candles, stop_loss_pct)
+            return {"task_id": task.id, "status": "running", "message": "Backtest started in background"}
+
         import asyncio
         # Chạy logic backtest nặng trong ThreadPool để không block server
-        result = await asyncio.to_thread(_run_backtest_sync, symbol, days, leverage, min_hold_candles)
+        result = await asyncio.to_thread(_run_backtest_sync, symbol, days, leverage, min_hold_candles, stop_loss_pct)
         return result
     except Exception as e:
         import traceback
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
+
+@app.get("/api/backtest/status/{task_id}")
+async def get_backtest_status(task_id: str):
+    """Get status of async backtest task."""
+    from celery.result import AsyncResult
+    from celery_app import celery_app
+
+    result = AsyncResult(task_id, app=celery_app)
+    if result.state == "PENDING":
+        response = {"state": result.state, "status": "Pending..."}
+    elif result.state == "PROGRESS":
+        response = {"state": result.state, "status": result.info}
+    elif result.state == "SUCCESS":
+        response = {"state": result.state, "result": result.result}
+    else:
+        response = {"state": result.state, "status": str(result.info)}
+
+    return response
 
 def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
     # Fetch historical data (tăng limit lên để lấy đủ lịch sử tính toán)
@@ -339,7 +362,19 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
 
     # Save results
     timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backtester.save_results(results, f"{symbol}_{timestamp_str}")
+    backtest_id = f"{symbol}_{timestamp_str}"
+    backtester.save_results(results, backtest_id)
+
+    # Save to database
+    try:
+        db = DatabaseManager()
+        # Add symbol to results for DB
+        results['symbol'] = symbol
+        results['days'] = days
+        db.save_backtest(results, backtest_id)
+        db.save_trades(results['trades'], backtest_id)
+    except Exception as e:
+        logger.error(f"Failed to save to database: {e}")
 
     return results
 

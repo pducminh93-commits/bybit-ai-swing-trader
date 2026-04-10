@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 import os
 import logging
+from services.database import DatabaseManager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

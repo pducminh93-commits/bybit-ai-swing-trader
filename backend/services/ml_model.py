@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import joblib
 import os
 from datetime import datetime, timedelta
+from services.model_manager import ModelManager
 
 class MLSignalPredictor:
     def __init__(self, model_type: str = 'rf'):
@@ -18,6 +19,7 @@ class MLSignalPredictor:
         self.model_type = model_type
         self.models = {}
         self.scalers = {}
+        self.model_manager = ModelManager()
         self.feature_columns = [
             'rsi', 'macd', 'macd_signal', 'macd_hist',
             'bb_upper', 'bb_middle', 'bb_lower', 'stoch_k', 'stoch_d',
@@ -204,7 +206,12 @@ class MLSignalPredictor:
         
         if os.path.exists(universal_model_path) and os.path.exists(universal_scaler_path):
             try:
-                self.models[symbol] = joblib.load(universal_model_path)
+                # Use ModelManager for model
+                self.models[symbol] = self.model_manager.get_model('universal_ensemble')
+                if self.models[symbol] is None:
+                    # Load manually if not cached
+                    self.models[symbol] = joblib.load(universal_model_path)
+                    self.model_manager.save_model('universal_ensemble', self.models[symbol])
                 self.scalers[symbol] = joblib.load(universal_scaler_path)
                 
                 # NẾU LÀ UNIVERSAL MODEL, cập nhật lại danh sách features thành 20 features của FeatureEngineer
@@ -233,7 +240,12 @@ class MLSignalPredictor:
 
             if os.path.exists(model_path) and os.path.exists(scaler_path):
                 try:
-                    self.models[symbol] = joblib.load(model_path)
+                    # Use ModelManager for model
+                    model_key = f"{symbol}_{m_type}"
+                    self.models[symbol] = self.model_manager.get_model(model_key)
+                    if self.models[symbol] is None:
+                        self.models[symbol] = joblib.load(model_path)
+                        self.model_manager.save_model(model_key, self.models[symbol])
                     self.scalers[symbol] = joblib.load(scaler_path)
                     self.model_type = m_type # Cập nhật lại type đang dùng
                     

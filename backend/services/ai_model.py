@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Dict, Any, Optional
 from services.ta_analysis import TechnicalAnalysis
+from services.signal_utils import SignalUtils
 
 class AISignalGenerator:
     def __init__(self):
@@ -48,6 +49,17 @@ class AISignalGenerator:
         """
         import time
         current_time = int(time.time())
+
+        # Validate indicators
+        if not SignalUtils.validate_indicators(indicators):
+            return {
+                'signal': 'HOLD',
+                'confidence': 0.0,
+                'reason': 'Insufficient indicator data',
+                'take_profit': 0.0,
+                'stop_loss': 0.0,
+                'entry_price': current_price
+            }
 
         # Get current position for this symbol
         current_position = self.current_positions.get(symbol)
@@ -296,10 +308,11 @@ class AISignalGenerator:
                     entry_price = current_price
                     reasons.append(f"Stable entry signal ({max(bullish_signals, bearish_signals)} indicators aligned)")
                 else:
-                    # Keep previous signal
-                    signal = last_signal_data['signal']
-                    confidence = last_signal_data['confidence']
-                    reasons.append(f"Signal stable, keeping {signal}")
+                    # Apply hysteresis
+                    signal = SignalUtils.apply_hysteresis(signal, last_signal_data['signal'], confidence)
+                    if signal == last_signal_data['signal']:
+                        confidence = last_signal_data['confidence']
+                        reasons.append(f"Signal stable, keeping {signal}")
             else:
                 signal = 'HOLD'
         elif confidence < 0.3 or (bullish_signals > 0 and bearish_signals > 0):

@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 requests
+httpx
 pandas
 numpy
 ta-lib
@@ -13,3 +14,6 @@ pytest
 mypy
 flake8
 black
+aiocache
+sqlalchemy
+celery[redis]
