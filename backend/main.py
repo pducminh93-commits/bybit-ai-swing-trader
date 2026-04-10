@@ -156,6 +156,33 @@ async def get_multiple_signals(symbols: Optional[str] = None) -> List[SignalResp
 
     return signals
 
+@app.get("/api/portfolio/correlation")
+async def get_correlation_matrix(symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT") -> Dict[str, Any]:
+    """Calculate correlation matrix for multiple symbols"""
+    try:
+        symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+
+        # Fetch price data for each symbol
+        price_data = {}
+        for symbol in symbol_list:
+            kline_data = await BybitService.fetch_klines(symbol, interval="1d", limit=100)
+            if kline_data.get("retCode") == 0:
+                closes = [float(k[4]) for k in kline_data["result"]["list"]]
+                price_data[symbol] = closes
+
+        # Calculate correlation matrix
+        import pandas as pd
+        df = pd.DataFrame(price_data)
+        correlation_matrix = df.corr().round(4).to_dict()
+
+        return {
+            "symbols": symbol_list,
+            "correlation_matrix": correlation_matrix,
+            "period_days": 100
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Correlation calculation failed: {str(e)}")
+
 @app.post("/api/ml/train-universal")
 async def train_universal_model(symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,DOGEUSDT"):
     """Train Universal/Global ML model for multiple symbols (Siêu tập dữ liệu)"""

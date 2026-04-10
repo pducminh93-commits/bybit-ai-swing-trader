@@ -17,3 +17,5 @@ black
 aiocache
 sqlalchemy
 celery[redis]
+pywavelets
+structlog

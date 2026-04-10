@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import talib as ta
+import pywt
 from typing import Dict, List, Any
 
 class TechnicalAnalysis:
@@ -99,7 +100,42 @@ class TechnicalAnalysis:
             cmf = ta.SMA(mf_volume, cmf_period) / ta.SMA(volume, cmf_period)
             indicators['cmf'] = cmf[-1] if len(cmf) > 0 else None
 
+        # Wavelet Transform features
+        wavelet_features = self._calculate_wavelet_features(close)
+        indicators.update(wavelet_features)
+
         return indicators
+
+    def _calculate_wavelet_features(self, close: np.ndarray) -> Dict[str, Any]:
+        """Calculate wavelet transform features for trend analysis"""
+        features = {}
+
+        if len(close) < 16:  # Minimum length for wavelet
+            return features
+
+        try:
+            # Use Discrete Wavelet Transform with db4 wavelet
+            coeffs = pywt.dwt(close, 'db4')
+            cA, cD = coeffs  # Approximation and detail coefficients
+
+            # Features from approximation coefficients (trend)
+            features['wavelet_approx_mean'] = np.mean(cA[-10:]) if len(cA) >= 10 else None
+            features['wavelet_approx_std'] = np.std(cA[-10:]) if len(cA) >= 10 else None
+
+            # Features from detail coefficients (noise/details)
+            features['wavelet_detail_energy'] = np.sum(cD**2) / len(cD) if len(cD) > 0 else None
+            features['wavelet_detail_std'] = np.std(cD) if len(cD) > 0 else None
+
+            # Trend strength indicator
+            if len(cA) >= 2 and len(cD) >= 2:
+                trend_ratio = np.abs(np.mean(cA[-5:]) - np.mean(cA[-10:-5])) / (np.std(cD[-5:]) + 1e-8)
+                features['wavelet_trend_strength'] = trend_ratio
+
+        except Exception as e:
+            # Wavelet calculation failed
+            features['wavelet_error'] = str(e)
+
+        return features
 
     def get_latest_price(self) -> float:
         """Get latest close price"""

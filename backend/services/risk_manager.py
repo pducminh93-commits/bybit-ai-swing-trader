@@ -1,5 +1,6 @@
 import math
-from typing import Dict, Any, Optional
+import numpy as np
+from typing import Dict, Any, Optional, List
 
 class RiskManager:
     """
@@ -92,3 +93,59 @@ class RiskManager:
             "risk_multiplier_applied": risk_multiplier,
             "notes": " | ".join(reasons_for_penalty) if reasons_for_penalty else "Normal Conditions"
         }
+
+    def optimize_portfolio(self, assets: List[str], expected_returns: List[float],
+                          covariance_matrix: List[List[float]], risk_free_rate: float = 0.02) -> Dict[str, Any]:
+        """
+        Modern Portfolio Theory optimization for multi-asset allocation.
+        Returns optimal weights for maximum Sharpe ratio.
+        """
+        try:
+            n_assets = len(assets)
+            if n_assets != len(expected_returns) or n_assets != len(covariance_matrix):
+                return {"error": "Input dimensions mismatch"}
+
+            # Convert to numpy arrays
+            mu = np.array(expected_returns)
+            cov = np.array(covariance_matrix)
+
+            # Constraints: weights sum to 1, no short selling
+            from scipy.optimize import minimize
+
+            def objective(weights):
+                portfolio_return = np.dot(weights, mu)
+                portfolio_volatility = np.sqrt(np.dot(weights.T, np.dot(cov, weights)))
+                sharpe = (portfolio_return - risk_free_rate) / portfolio_volatility
+                return -sharpe  # Minimize negative Sharpe
+
+            constraints = [
+                {'type': 'eq', 'fun': lambda w: np.sum(w) - 1},  # Sum to 1
+            ]
+            bounds = [(0, 1) for _ in range(n_assets)]  # No short selling
+
+            # Initial guess: equal weight
+            init_weights = np.ones(n_assets) / n_assets
+
+            result = minimize(objective, init_weights, method='SLSQP',
+                            bounds=bounds, constraints=constraints)
+
+            if result.success:
+                optimal_weights = result.x
+                portfolio_return = np.dot(optimal_weights, mu)
+                portfolio_volatility = np.sqrt(np.dot(optimal_weights.T, np.dot(cov, optimal_weights)))
+                sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_volatility
+
+                return {
+                    "optimal_weights": dict(zip(assets, optimal_weights)),
+                    "expected_return": portfolio_return,
+                    "volatility": portfolio_volatility,
+                    "sharpe_ratio": sharpe_ratio,
+                    "status": "success"
+                }
+            else:
+                return {"error": "Optimization failed", "message": result.message}
+
+        except ImportError:
+            return {"error": "scipy not installed for portfolio optimization"}
+        except Exception as e:
+            return {"error": str(e)}

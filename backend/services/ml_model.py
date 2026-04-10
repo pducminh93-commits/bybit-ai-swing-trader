@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, roc_auc_score, precision_recall_curve, auc
 from typing import Dict, List, Any, Optional, Tuple
 import joblib
 import os
@@ -154,8 +154,37 @@ class MLSignalPredictor:
             'status': 'trained',
             'accuracy': float(accuracy),
             'feature_importance': feature_importance,
-            'classification_report': classification_report(y_test, y_pred, output_dict=True)
+            'classification_report': classification_report(y_test, y_pred, output_dict=True),
+            'evaluation': self.evaluate_model(X_test, y_test)
         }
+
+    def evaluate_model(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, Any]:
+        """Evaluate model with comprehensive metrics"""
+        if not hasattr(self, 'model') or self.model is None:
+            return {'error': 'No model trained'}
+
+        try:
+            # Need to train model first to have it
+            # This is a placeholder - in practice, evaluate after training
+            y_pred = self.model.predict(X_test)
+            y_pred_proba = self.model.predict_proba(X_test)[:, 1] if hasattr(self.model, 'predict_proba') else None
+
+            metrics = {
+                'accuracy': accuracy_score(y_test, y_pred),
+                'classification_report': classification_report(y_test, y_pred, output_dict=True),
+            }
+
+            if y_pred_proba is not None:
+                metrics['auc'] = roc_auc_score(y_test, y_pred_proba)
+
+                # Precision-Recall curve
+                precision, recall, _ = precision_recall_curve(y_test, y_pred_proba)
+                metrics['pr_auc'] = auc(recall, precision)
+
+            return metrics
+
+        except Exception as e:
+            return {'error': str(e)}
 
     def predict_signal(self, indicators: Dict[str, Any], price_changes: List[float],
                        volume_change: float, symbol: str) -> Dict[str, Any]:

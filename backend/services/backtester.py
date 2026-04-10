@@ -5,11 +5,28 @@ from datetime import datetime, timedelta
 import json
 import os
 import logging
+import structlog
 from services.database import DatabaseManager
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Setup structured logging
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.processors.UnicodeDecoder(),
+        structlog.processors.JSONRenderer()
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    wrapper_class=structlog.stdlib.BoundLogger,
+    cache_logger_on_first_use=True,
+)
+logger = structlog.get_logger()
 
 class Backtester:
     def __init__(self, initial_balance: float = 100, commission: float = 0.001, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
@@ -37,6 +54,8 @@ class Backtester:
         self.equity_curve = []
         self.current_time = None
         self.last_open_candle = -self.min_hold_candles  # To allow first trade
+        self.walk_forward_results = []  # For walk-forward validation
+        self.position_sizing_method = 'fixed'  # 'fixed', 'kelly', 'volatility'
 
     def run_backtest(self, signals_data: List[Dict[str, Any]], price_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         logger.info(f"Starting backtest with {len(signals_data)} signals and {len(price_data)} price points")
@@ -258,6 +277,84 @@ class Backtester:
 
             self.position = 0
             self.entry_price = 0
+
+    def walk_forward_validation(self, signals_data: List[Dict[str, Any]], price_data: List[Dict[str, Any]],
+                              window_size: int = 100, step_size: int = 20) -> Dict[str, Any]:
+        """
+        Perform walk-forward validation by training/testing on sliding windows.
+        """
+        results = []
+        n_points = len(signals_data)
+
+        for start in range(0, n_points - window_size, step_size):
+            end = start + window_size
+            if end >= n_points:
+                break
+
+            # Train window
+            train_signals = signals_data[start:end]
+            train_prices = price_data[start:end]
+
+            # Test window (next step_size points)
+            test_start = end
+            test_end = min(end + step_size, n_points)
+            test_signals = signals_data[test_start:test_end]
+            test_prices = price_data[test_start:test_end]
+
+            # Run backtest on test window
+            self.reset()
+            test_result = self.run_backtest(test_signals, test_prices)
+
+            results.append({
+                'train_window': {'start': start, 'end': end},
+                'test_window': {'start': test_start, 'end': test_end},
+                'metrics': test_result['metrics'],
+                'total_return': test_result['total_return']
+            })
+
+        # Aggregate results
+        total_returns = [r['total_return'] for r in results]
+        win_rates = [r['metrics']['win_rate'] for r in results]
+
+        return {
+            'walk_forward_results': results,
+            'average_return': np.mean(total_returns),
+            'return_std': np.std(total_returns),
+            'average_win_rate': np.mean(win_rates),
+            'sharpe_ratio': np.mean(total_returns) / np.std(total_returns) if np.std(total_returns) > 0 else 0,
+            'total_windows': len(results)
+        }
+
+    def kelly_position_size(self, win_rate: float, win_loss_ratio: float) -> float:
+        """
+        Calculate Kelly Criterion position size.
+        Kelly % = (bp - q) / b
+        where b = odds (avg_win / avg_loss), p = win_rate, q = 1-p
+        """
+        if win_rate <= 0 or win_rate >= 1 or win_loss_ratio <= 0:
+            return 0.01  # Default 1%
+
+        b = win_loss_ratio
+        kelly = (win_rate * b - (1 - win_rate)) / b
+
+        # Half Kelly for safety
+        return max(0.005, min(kelly * 0.5, 0.1))  # Between 0.5% and 10%
+
+    def calculate_position_size(self, capital: float, risk_pct: float = 0.02) -> float:
+        """
+        Calculate position size based on method.
+        For now, return fixed percentage, but can extend to Kelly.
+        """
+        if self.position_sizing_method == 'kelly':
+            # Need historical data to calculate win_rate and win_loss_ratio
+            # Placeholder: use fixed for now
+            return capital * risk_pct
+        elif self.position_sizing_method == 'volatility':
+            # ATR-based sizing
+            return capital * risk_pct
+        else:
+            # Fixed percentage
+            return capital * risk_pct
 
     def _calculate_metrics(self) -> Dict[str, Any]:
         """Calculate performance metrics"""
