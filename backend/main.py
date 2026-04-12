@@ -21,7 +21,7 @@ from core.config.settings import get_settings
 from core.websocket.manager import websocket_manager
 
 # Prometheus metrics
-from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from prometheus_fastapi_instrumentator import Instrumentator
 
 settings = get_settings()
 from models.signal_model import SignalResponse, DemoSettingsRequest
@@ -42,10 +42,6 @@ async def lifespan(app: FastAPI):
         from core.database.config import db
         await db.create_tables()
         logger.info("Database initialized successfully")
-
-        # Initialize Prometheus metrics
-        instrumentator = Instrumentator().instrument(app)
-        logger.info("Prometheus metrics initialized")
 
         # Start WebSocket signal streaming
         logger.info("Starting WebSocket signal streaming...")
@@ -91,10 +87,13 @@ from typing import List, Optional, Dict, Any
 
 app = FastAPI(
     title="Bybit AI Swing Trader Backend",
-    version="2.0.0",
-    description="Enhanced AI-powered swing trading system with database persistence",
+    version="3.0.0",
+    description="Enterprise-grade AI-powered swing trading system with real-time capabilities",
     lifespan=lifespan
 )
+
+# Initialize Prometheus metrics
+Instrumentator().instrument(app).expose(app)
 
 # CORS middleware
 app.add_middleware(
@@ -520,7 +519,8 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
             'stop_loss_pct': stop_loss_pct
         }
 
-        backtest_id = await DatabaseService.save_backtest_result(results, symbol)
+        # Save synchronously since this function runs in a thread
+        backtest_id = DatabaseService.save_backtest_result_sync(results, symbol)
         logger.info(f"Backtest saved to database with ID: {backtest_id}")
     except Exception as e:
         logger.error(f"Failed to save backtest to database: {e}")

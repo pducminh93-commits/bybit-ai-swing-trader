@@ -1,0 +1,8 @@
+{"timestamp": "2026-04-13T02:10:45", "level": "INFO", "logger": "bybit_trader.main", "message": "Starting Bybit AI Swing Trader..."}
+{"timestamp": "2026-04-13T02:10:47", "level": "INFO", "logger": "bybit_trader.main", "message": "Database initialized successfully"}
+{"timestamp": "2026-04-13T02:10:47", "level": "ERROR", "logger": "bybit_trader.main", "message": "Failed to initialize application: Cannot add middleware after an application has started"}
+{"timestamp": "2026-04-13T02:11:21", "level": "INFO", "logger": "bybit_trader.main", "message": "Starting Bybit AI Swing Trader..."}
+{"timestamp": "2026-04-13T02:11:21", "level": "INFO", "logger": "bybit_trader.main", "message": "Database initialized successfully"}
+{"timestamp": "2026-04-13T02:11:21", "level": "INFO", "logger": "bybit_trader.main", "message": "Starting WebSocket signal streaming..."}
+{"timestamp": "2026-04-13T02:11:21", "level": "INFO", "logger": "bybit_trader.main", "message": "WebSocket signal streaming started"}
+{"timestamp": "2026-04-13T02:11:21", "level": "INFO", "logger": "bybit_trader.websocket", "message": "Starting real-time signal streaming..."}

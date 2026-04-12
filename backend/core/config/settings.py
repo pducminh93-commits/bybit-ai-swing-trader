@@ -1,4 +1,10 @@
-from pydantic import BaseSettings, validator
+try:
+    # Pydantic v2
+    from pydantic import field_validator
+    from pydantic_settings import BaseSettings
+except ImportError:
+    # Pydantic v1
+    from pydantic import BaseSettings, validator as field_validator
 from typing import Optional, List
 import os
 
@@ -20,7 +26,8 @@ class APISettings(BaseSettings):
     workers: int = 1
     debug: bool = False
 
-    @validator('port')
+    @field_validator('port')
+    @classmethod
     def validate_port(cls, v):
         if not (1 <= v <= 65535):
             raise ValueError('Port must be between 1 and 65535')
@@ -55,7 +62,8 @@ class MLSettings(BaseSettings):
     max_training_samples: int = 10000
     validation_split: float = 0.2
 
-    @validator('validation_split')
+    @field_validator('validation_split')
+    @classmethod
     def validate_validation_split(cls, v):
         if not (0.1 <= v <= 0.5):
             raise ValueError('Validation split must be between 0.1 and 0.5')
@@ -74,19 +82,25 @@ class TradingSettings(BaseSettings):
     min_capital: float = 10.0
     max_capital: float = 1000000.0
 
-    @validator('default_capital')
+    @field_validator('default_capital')
+    @classmethod
     def validate_default_capital(cls, v):
-        if not (cls.min_capital <= v <= cls.max_capital):
-            raise ValueError(f'Default capital must be between {cls.min_capital} and {cls.max_capital}')
+        min_capital = 10.0
+        max_capital = 1000000.0
+        if not (min_capital <= v <= max_capital):
+            raise ValueError(f'Default capital must be between {min_capital} and {max_capital}')
         return v
 
-    @validator('default_leverage')
+    @field_validator('default_leverage')
+    @classmethod
     def validate_default_leverage(cls, v):
-        if not (1 <= v <= cls.max_leverage):
-            raise ValueError(f'Default leverage must be between 1 and {cls.max_leverage}')
+        max_leverage = 100.0
+        if not (1 <= v <= max_leverage):
+            raise ValueError(f'Default leverage must be between 1 and {max_leverage}')
         return v
 
-    @validator('default_stop_loss_pct')
+    @field_validator('default_stop_loss_pct')
+    @classmethod
     def validate_default_stop_loss_pct(cls, v):
         if not (0 < v <= 1):
             raise ValueError('Default stop loss percentage must be between 0 and 1')
@@ -103,7 +117,8 @@ class LoggingSettings(BaseSettings):
     max_file_size: int = 10485760  # 10MB
     backup_count: int = 5
 
-    @validator('level')
+    @field_validator('level')
+    @classmethod
     def validate_level(cls, v):
         allowed_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v.upper() not in allowed_levels:

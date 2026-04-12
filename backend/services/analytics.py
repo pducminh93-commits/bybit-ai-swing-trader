@@ -365,7 +365,8 @@ class AnalyticsService:
             # Kelly criterion recommendations
             kelly = performance_metrics.get('kelly_criterion', 0)
             if kelly > 0.1:
-                recommendations.append(".1f"            elif kelly < 0:
+                recommendations.append(f"High Kelly criterion ({kelly:.1f}) - consider increasing position sizes")
+            elif kelly < 0:
                 recommendations.append("Negative Kelly criterion - avoid using this strategy")
 
             # Default recommendations

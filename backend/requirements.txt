@@ -10,6 +10,7 @@ tensorflow
 bybit-api
 python-dotenv
 pydantic[dotenv]
+pydantic-settings
 pydantic
 pytest
 pytest-asyncio
@@ -17,9 +18,10 @@ pytest-cov
 mypy
 flake8
 black
-prometheus-fastapi-instrumentator
+prometheus-fastapi-instrumentator==5.8.2
 uvloop
 websockets
+aiosqlite
 scikit-learn
 xgboost
 lightgbm

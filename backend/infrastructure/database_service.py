@@ -11,6 +11,17 @@ class DatabaseService:
     """Service for database operations"""
 
     @staticmethod
+    def save_backtest_result_sync(backtest_data: Dict[str, Any], symbol: str) -> int:
+        """Synchronous wrapper for save_backtest_result"""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(DatabaseService.save_backtest_result(backtest_data, symbol))
+            return result
+        finally:
+            loop.close()
+
+    @staticmethod
     async def save_backtest_result(backtest_data: Dict[str, Any], symbol: str) -> int:
         """Save backtest result to database"""
         async with db.async_session() as session:
