@@ -1,7 +1,8 @@
 import os
 import time
 import logging
-from typing import Dict, Any, List
+import asyncio
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -20,7 +21,7 @@ class WalkForwardTrainer:
     theo phương pháp cửa sổ trượt (Sliding Window / Walk-forward).
     Hỗ trợ Global Model (Huấn luyện đa cặp tiền).
     """
-    def __init__(self, symbols: List[str] = None, timeframe: str = "240"):
+    def __init__(self, symbols: Optional[List[str]] = None, timeframe: str = "240"):
         # Danh sách các coin đại diện cho thị trường để tạo Siêu tập dữ liệu
         if symbols is None:
             self.symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT"]
@@ -30,14 +31,14 @@ class WalkForwardTrainer:
         self.timeframe = timeframe
         # Thay đổi logic bên dưới để tự dùng VotingClassifier thay vì phụ thuộc MLSignalPredictor cũ
         
-    def fetch_and_prepare_data(self, symbol: str) -> pd.DataFrame:
+    async def fetch_and_prepare_data(self, symbol: str) -> pd.DataFrame:
         """Kéo dữ liệu mới nhất và chạy Feature Engineering cho một coin"""
         logger.info(f"Đang tải dữ liệu mới nhất cho {symbol}...")
         
         # 1. Kéo dữ liệu
-        klines_resp = BybitService.fetch_klines(symbol, interval=self.timeframe, limit=1000)
-        oi_resp = BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500)
-        fr_resp = BybitService.fetch_funding_rate_history(symbol, limit=500)
+        klines_resp = await BybitService.fetch_klines(symbol, interval=self.timeframe, limit=1000)
+        oi_resp = await BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500)
+        fr_resp = await BybitService.fetch_funding_rate_history(symbol, limit=500)
         
         # 2. Xử lý API response
         klines = klines_resp.get('result', {}).get('list', [])
@@ -75,7 +76,7 @@ class WalkForwardTrainer:
         df.dropna(inplace=True)
         return df
 
-    def retrain_universal_model(self):
+    async def retrain_universal_model(self):
         """Thực thi toàn bộ pipeline huấn luyện Universal Model (Global Model)"""
         logger.info(f"Bắt đầu chu trình Walk-forward Universal Retraining...")
         
@@ -84,8 +85,14 @@ class WalkForwardTrainer:
         # Vòng lặp kéo dữ liệu tất cả các coin
         for sym in self.symbols:
             try:
-                df = self.fetch_and_prepare_data(sym)
+                logger.info(f"Fetching data for {sym}...")
+                df = await self.fetch_and_prepare_data(sym)
+                logger.info(f"Successfully fetched data for {sym}. Shape: {df.shape}")
+
+                logger.info(f"Creating labels for {sym}...")
                 df = self.create_labels(df)
+                logger.info(f"Successfully created labels for {sym}. Shape: {df.shape}")
+
                 if len(df) >= 100: # Hạ ngưỡng xuống vì API Bybit giới hạn lịch sử OI/FR max 200
                     # Giữ lại 800 nến gần nhất (hoặc ít hơn nếu không đủ)
                     recent_df = df.tail(800).copy()
@@ -94,85 +101,96 @@ class WalkForwardTrainer:
                 else:
                     logger.warning(f"Không đủ dữ liệu cho {sym} (Chỉ có {len(df)} dòng sau khi merge)")
             except Exception as e:
-                logger.error(f"Lỗi khi tải dữ liệu cho {sym}: {e}")
+                logger.error(f"Lỗi khi tải dữ liệu cho {sym}: {e}", exc_info=True)
                 
         if not all_dfs:
             logger.error("Thất bại: Không gom được dữ liệu nào!")
-            return False
+            return {"status": "error", "message": "Failed to gather any data."}
             
         # Trộn chung thành Siêu tập dữ liệu (Mega Dataset)
-        mega_df = pd.concat(all_dfs, ignore_index=True)
-        logger.info(f"Đã tạo Siêu tập dữ liệu với {len(mega_df)} mẫu từ {len(all_dfs)} coins.")
-        
-        # Xáo trộn dữ liệu (Shuffle) để model không bị thiên vị học theo thứ tự coin
-        mega_df = mega_df.sample(frac=1, random_state=42).reset_index(drop=True)
-        
-        # Tách Features (X) và Target (y)
-        exclude_cols = ['target', 'symbol_label', 'future_max', 'future_min', 'upside', 'downside', 'startTime', 'open', 'high', 'low', 'close', 'volume', 'turnover']
-        feature_cols = [col for col in mega_df.columns if col not in exclude_cols]
-        
-        from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.model_selection import train_test_split
-        import joblib
-        
-        X = mega_df[feature_cols].values
-        y = mega_df['target'].values
-        
-        # Chia train/test (80/20)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        
-        # Cập nhật Scaler
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        
-        # Khởi tạo mô hình Ensemble (Soft Voting Mix)
-        logger.info("Đang fitting mô hình Universal Ensemble (RF + GB) với Siêu tập dữ liệu...")
-        rf_model = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10, n_jobs=-1)
-        gb_model = GradientBoostingClassifier(n_estimators=100, random_state=42, max_depth=5)
-        
-        universal_model = VotingClassifier(
-            estimators=[('rf', rf_model), ('gb', gb_model)],
-            voting='soft'
-        )
-        
-        # Huấn luyện
-        universal_model.fit(X_train_scaled, y_train)
-        
-        # Đánh giá
-        score = universal_model.score(X_test_scaled, y_test)
-        logger.info(f"Độ chính xác (Accuracy) trên Siêu tập dữ liệu (Test set): {score*100:.2f}%")
-        
-        # Lưu lại Version Universal mới
-        os.makedirs('models', exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        
-        # Lưu đè model Universal chính
-        joblib.dump(universal_model, f'models/universal_ensemble_model.pkl')
-        joblib.dump(scaler, f'models/universal_ensemble_scaler.pkl')
-        
-        # Lưu backup version
-        os.makedirs('models/backups', exist_ok=True)
-        joblib.dump(universal_model, f'models/backups/universal_ensemble_{timestamp}_model.pkl')
-        
-        logger.info(f"Đã lưu thành công mô hình Universal mới lúc {timestamp}")
-        
-        # Trích xuất Feature Importance để hiển thị cho UI
-        feature_importance = {}
         try:
-            rf_imp = universal_model.named_estimators_['rf'].feature_importances_
-            gb_imp = universal_model.named_estimators_['gb'].feature_importances_
-            avg_imp = (rf_imp + gb_imp) / 2
-            feature_importance = dict(zip(feature_cols, avg_imp))
-        except Exception as e:
-            logger.warning(f"Không thể trích xuất feature_importance: {e}")
+            logger.info("Concatenating all dataframes...")
+            mega_df = pd.concat(all_dfs, ignore_index=True)
+            logger.info(f"Đã tạo Siêu tập dữ liệu với {len(mega_df)} mẫu từ {len(all_dfs)} coins.")
             
-        return {
-            "status": "success",
-            "accuracy": float(score),
-            "feature_importance": feature_importance
-        }
+            # Xáo trộn dữ liệu (Shuffle) để model không bị thiên vị học theo thứ tự coin
+            mega_df = mega_df.sample(frac=1, random_state=42).reset_index(drop=True)
+            
+            # Tách Features (X) và Target (y)
+            exclude_cols = ['target', 'symbol_label', 'future_max', 'future_min', 'upside', 'downside', 'startTime', 'open', 'high', 'low', 'close', 'volume', 'turnover']
+            feature_cols = [col for col in mega_df.columns if col not in exclude_cols]
+            
+            from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.model_selection import train_test_split
+            import joblib
+            
+            X = mega_df[feature_cols].values
+            y = mega_df['target'].values
+            
+            # Chia train/test (80/20)
+            logger.info("Splitting data into training and testing sets...")
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            # Cập nhật Scaler
+            logger.info("Scaling data...")
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Khởi tạo mô hình Ensemble (Soft Voting Mix)
+            logger.info("Đang fitting mô hình Universal Ensemble (RF + GB) với Siêu tập dữ liệu...")
+            rf_model = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10, n_jobs=-1)
+            gb_model = GradientBoostingClassifier(n_estimators=100, random_state=42, max_depth=5)
+            
+            universal_model = VotingClassifier(
+                estimators=[('rf', rf_model), ('gb', gb_model)],
+                voting='soft'
+            )
+            
+            # Huấn luyện
+            logger.info("Training the model...")
+            universal_model.fit(X_train_scaled, y_train)
+            logger.info("Model training completed.")
+            
+            # Đánh giá
+            logger.info("Evaluating the model...")
+            score = universal_model.score(X_test_scaled, y_test)
+            logger.info(f"Độ chính xác (Accuracy) trên Siêu tập dữ liệu (Test set): {score*100:.2f}%")
+            
+            # Lưu lại Version Universal mới
+            logger.info("Saving the model and scaler...")
+            os.makedirs('models', exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+            
+            # Lưu đè model Universal chính
+            joblib.dump(universal_model, f'models/universal_ensemble_model.pkl')
+            joblib.dump(scaler, f'models/universal_ensemble_scaler.pkl')
+            
+            # Lưu backup version
+            os.makedirs('models/backups', exist_ok=True)
+            joblib.dump(universal_model, f'models/backups/universal_ensemble_{timestamp}_model.pkl')
+            
+            logger.info(f"Đã lưu thành công mô hình Universal mới lúc {timestamp}")
+            
+            # Trích xuất Feature Importance để hiển thị cho UI
+            feature_importance = {}
+            try:
+                rf_imp = universal_model.named_estimators_['rf'].feature_importances_
+                gb_imp = universal_model.named_estimators_['gb'].feature_importances_
+                avg_imp = (rf_imp + gb_imp) / 2
+                feature_importance = dict(zip(feature_cols, avg_imp))
+            except Exception as e:
+                logger.warning(f"Không thể trích xuất feature_importance: {e}")
+                
+            return {
+                "status": "success",
+                "accuracy": float(score),
+                "feature_importance": feature_importance
+            }
+        except Exception as e:
+            logger.error(f"An error occurred during model training pipeline: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
     trainer = WalkForwardTrainer()

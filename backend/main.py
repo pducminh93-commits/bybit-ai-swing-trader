@@ -1,7 +1,16 @@
 import requests
 import asyncio
+import logging
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
+
+# Configure logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    filename='backend.log',
+                    filemode='a')
+logger = logging.getLogger(__name__)
+
 from fastapi.middleware.cors import CORSMiddleware
 from services.bybit_service import BybitService
 from services.ta_analysis import TechnicalAnalysis
@@ -12,7 +21,7 @@ from services.backtester import Backtester
 from services.demo_trading import demo_service
 from models.signal_model import SignalResponse, DemoSettingsRequest
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 app = FastAPI(title="Bybit AI Swing Trader Backend", version="1.0.0")
 
@@ -51,11 +60,11 @@ async def get_kline(
 @app.get("/api/bybit/tickers")
 async def get_tickers() -> dict:
     try:
-        data = BybitService.fetch_tickers()
+        data = await BybitService.fetch_tickers()
         if data.get("retCode") != 0:
             raise HTTPException(status_code=400, detail=data.get("retMsg", "Failed to fetch tickers"))
         return data
-    except requests.RequestException as e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bybit API error: {str(e)}")
 
 @app.get("/api/signals/{symbol}")
@@ -73,7 +82,7 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
                 current_price = mtf_results['4h']['current_price']
             else:
                 # Fallback to single timeframe
-                kline_data = BybitService.fetch_klines(symbol, interval="240", limit=200)
+                kline_data = await BybitService.fetch_klines(symbol, interval="240", limit=200)
                 if kline_data.get("retCode") != 0:
                     raise HTTPException(status_code=400, detail=kline_data.get("retMsg", "Failed to fetch klines"))
                 klines = kline_data["result"]["list"]
@@ -195,9 +204,9 @@ async def train_universal_model(symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,
             raise HTTPException(status_code=400, detail="Symbols list cannot be empty")
             
         trainer = WalkForwardTrainer(symbols=symbol_list)
-        
-        # Chạy tác vụ huấn luyện nặng trong ThreadPool để không làm treo Web Server
-        result_dict = await asyncio.to_thread(trainer.retrain_universal_model)
+
+        # Chạy tác vụ huấn luyện nặng
+        result_dict = await trainer.retrain_universal_model()
         
         if result_dict and isinstance(result_dict, dict) and result_dict.get("status") == "success":
             return {
@@ -212,7 +221,7 @@ async def train_universal_model(symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,
             
     except Exception as e:
         import traceback
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Universal Training error: {str(e)}")
 
 @app.post("/api/ml/train/{symbol}")
@@ -220,7 +229,7 @@ async def train_ml_model(symbol: str, model_type: str = "rf"):
     """Train ML model for symbol"""
     try:
         # Fetch historical data for training (last 1000 candles)
-        kline_data = BybitService.fetch_klines(symbol, interval="240", limit=1000)
+        kline_data = await BybitService.fetch_klines(symbol, interval="240", limit=1000)
         if kline_data.get("retCode") != 0:
             raise HTTPException(status_code=400, detail="Failed to fetch historical data")
 
@@ -271,7 +280,7 @@ async def run_backtest(symbol: str, days: int = 30, leverage: float = 10.0, min_
         return result
     except Exception as e:
         import traceback
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
 
 @app.get("/api/backtest/status/{task_id}")
@@ -294,7 +303,7 @@ async def get_backtest_status(task_id: str):
 
 def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
     # Fetch historical data (tăng limit lên để lấy đủ lịch sử tính toán)
-    kline_data = BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000))  # 6 candles per day + 100 for indicators buffer
+    kline_data = asyncio.run(BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000)))  # 6 candles per day + 100 for indicators buffer
     if kline_data.get("retCode") != 0:
         raise ValueError("Failed to fetch historical data")
 
@@ -532,7 +541,7 @@ async def update_demo_settings(
     except Exception as e:
         import traceback
         print(f"Error updating demo settings: {e}")
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/demo/reset")

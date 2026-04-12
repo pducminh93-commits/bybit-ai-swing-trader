@@ -25,7 +25,7 @@ class ModelManager:
     def __init__(self):
         if not hasattr(self, '_initialized'):
             self._initialized = True
-            self.models_dir = Path("backend/models")
+            self.models_dir = Path("../models")
             self._preload_models()
 
     def _preload_models(self):

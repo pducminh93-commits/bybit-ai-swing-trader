@@ -34,9 +34,10 @@ class BybitService:
             return response.json()
 
     @staticmethod
-    def fetch_open_interest(symbol: str, intervalTime: str = "4h", limit: int = 50) -> Dict[str, Any]:
+    @cached(ttl=300)  # Cache for 5 minutes
+    async def fetch_open_interest(symbol: str, intervalTime: str = "4h", limit: int = 50) -> Dict[str, Any]:
         """
-        Fetch Open Interest history from Bybit
+        Fetch Open Interest history from Bybit asynchronously
         intervalTime: 5min, 15min, 30min, 1h, 4h, 1d
         """
         params = {
@@ -45,20 +46,23 @@ class BybitService:
             "intervalTime": intervalTime,
             "limit": limit
         }
-        response = requests.get(f"{BybitService.BASE_URL}/open-interest", params=params)
-        response.raise_for_status()
-        return response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BybitService.BASE_URL}/open-interest", params=params)
+            response.raise_for_status()
+            return response.json()
 
     @staticmethod
-    def fetch_funding_rate_history(symbol: str, limit: int = 50) -> Dict[str, Any]:
+    @cached(ttl=300)  # Cache for 5 minutes
+    async def fetch_funding_rate_history(symbol: str, limit: int = 50) -> Dict[str, Any]:
         """
-        Fetch historical funding rate from Bybit
+        Fetch historical funding rate from Bybit asynchronously
         """
         params = {
             "category": "linear",
             "symbol": symbol,
             "limit": limit
         }
-        response = requests.get(f"{BybitService.BASE_URL}/funding/history", params=params)
-        response.raise_for_status()
-        return response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{BybitService.BASE_URL}/funding/history", params=params)
+            response.raise_for_status()
+            return response.json()
