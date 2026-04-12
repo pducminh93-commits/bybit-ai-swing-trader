@@ -1,15 +1,45 @@
-import requests
 import asyncio
-import logging
-from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timedelta
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
-# Configure logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    filename='backend.log',
-                    filemode='a')
-logger = logging.getLogger(__name__)
+from services.bybit_service import BybitService
+from services.ta_analysis import TechnicalAnalysis
+from services.ai_model import AISignalGenerator
+from services.multi_timeframe import MultiTimeframeAnalysis
+from services.ml_model import MLSignalPredictor
+from services.backtester import Backtester
+from services.demo_trading import demo_service
+from infrastructure.database_service import DatabaseService
+from core.logging.config import get_logger
+from core.exceptions.handlers import global_exception_handler, log_request_middleware, BybitTraderException
+from models.signal_model import SignalResponse, DemoSettingsRequest
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+
+# Initialize logging
+logger = get_logger("main")
+
+# Lifespan context manager for startup/shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager"""
+    # Startup
+    logger.info("Starting Bybit AI Swing Trader...")
+    try:
+        # Initialize database on startup
+        from core.database.config import db
+        await db.create_tables()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Bybit AI Swing Trader...")
 
 from fastapi.middleware.cors import CORSMiddleware
 from services.bybit_service import BybitService
@@ -19,11 +49,17 @@ from services.multi_timeframe import MultiTimeframeAnalysis
 from services.ml_model import MLSignalPredictor
 from services.backtester import Backtester
 from services.demo_trading import demo_service
+from infrastructure.database_service import DatabaseService
 from models.signal_model import SignalResponse, DemoSettingsRequest
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
-app = FastAPI(title="Bybit AI Swing Trader Backend", version="1.0.0")
+app = FastAPI(
+    title="Bybit AI Swing Trader Backend",
+    version="2.0.0",
+    description="Enhanced AI-powered swing trading system with database persistence",
+    lifespan=lifespan
+)
 
 # CORS middleware
 app.add_middleware(
@@ -33,6 +69,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add exception handler
+app.add_exception_handler(Exception, global_exception_handler)
+
+# Add request logging middleware
+@app.middleware("http")
+async def add_request_logging(request: Request, call_next):
+    return await log_request_middleware(request, call_next)
 
 class KlineResponse(BaseModel):
     startTime: str
@@ -131,6 +175,24 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
                 tp = trade_decision["take_profit"]
                 sl = trade_decision["stop_loss"]
                 
+            # Save signal to database
+            signal_data = {
+                "symbol": symbol,
+                "signal": final_signal,
+                "confidence": ai_confidence,
+                "timestamp": result["timestamp"] or datetime.utcnow(),
+                "entry_price": result["latest_price"],
+                "stop_loss": sl,
+                "take_profit": tp,
+                "reason": reason,
+                "indicators": result["features"],
+                "source": "live"
+            }
+            try:
+                await DatabaseService.save_signal(signal_data)
+            except Exception as e:
+                logger.warning(f"Failed to save signal to database: {e}")
+
             return SignalResponse(
                 symbol=symbol,
                 signal=final_signal,
@@ -396,21 +458,25 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
     backtester = Backtester(initial_balance=100, leverage=leverage, min_hold_candles=min_hold_candles, stop_loss_pct=stop_loss_pct)
     results = backtester.run_backtest(signals_data, price_data)
 
-    # Save results
-    timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backtest_id = f"{symbol}_{timestamp_str}"
-    backtester.save_results(results, backtest_id)
-
-    # Save to database
+    # Save results to database
     try:
-        db = DatabaseManager()
-        # Add symbol to results for DB
+        # Add metadata to results
         results['symbol'] = symbol
-        results['days'] = days
-        db.save_backtest(results, backtest_id)
-        db.save_trades(results['trades'], backtest_id)
+        results['strategy_name'] = 'AI Swing Trader'
+        from datetime import timedelta
+        results['start_date'] = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        results['end_date'] = datetime.utcnow().isoformat()
+        results['config'] = {
+            'leverage': leverage,
+            'min_hold_candles': min_hold_candles,
+            'stop_loss_pct': stop_loss_pct
+        }
+
+        backtest_id = await DatabaseService.save_backtest_result(results, symbol)
+        logger.info(f"Backtest saved to database with ID: {backtest_id}")
     except Exception as e:
-        logger.error(f"Failed to save to database: {e}")
+        logger.error(f"Failed to save backtest to database: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save backtest: {str(e)}")
 
     return results
 
@@ -559,6 +625,61 @@ async def reset_demo_simulation():
         print(f"Error resetting demo: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Database API Endpoints
+@app.get("/api/backtests")
+async def get_backtests(symbol: Optional[str] = None, limit: int = 20):
+    """Get backtest results from database"""
+    try:
+        results = await DatabaseService.get_backtest_results(symbol, limit)
+        return {"backtests": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Failed to get backtests: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get backtests: {str(e)}")
+
+@app.get("/api/backtests/{backtest_id}")
+async def get_backtest_detail(backtest_id: int):
+    """Get detailed backtest result with trades"""
+    try:
+        result = await DatabaseService.get_backtest_by_id(backtest_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Backtest not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get backtest detail: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get backtest detail: {str(e)}")
+
+@app.get("/api/signals/history")
+async def get_signals_history(symbol: Optional[str] = None, limit: int = 50, hours: int = 24):
+    """Get historical signals from database"""
+    try:
+        signals = await DatabaseService.get_signals(symbol, limit, hours)
+        return {"signals": signals, "count": len(signals)}
+    except Exception as e:
+        logger.error(f"Failed to get signals history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get signals history: {str(e)}")
+
+@app.get("/api/ml/models")
+async def get_ml_models(active_only: bool = False):
+    """Get ML models from database"""
+    try:
+        models = await DatabaseService.get_ml_models(active_only)
+        return {"models": models, "count": len(models)}
+    except Exception as e:
+        logger.error(f"Failed to get ML models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get ML models: {str(e)}")
+
+@app.get("/api/stats")
+async def get_statistics():
+    """Get database statistics"""
+    try:
+        stats = await DatabaseService.get_statistics()
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {str(e)}")
+
 @app.get("/")
 async def root():
-    return {"message": "Bybit AI Swing Trader Backend API - Enhanced with ML & Backtesting"}
+    return {"message": "Bybit AI Swing Trader Backend API - Enhanced with ML & Database"}
