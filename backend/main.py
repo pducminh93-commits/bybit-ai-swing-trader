@@ -14,6 +14,7 @@ from services.demo_trading import demo_service
 from infrastructure.database_service import DatabaseService
 from core.logging.config import get_logger
 from core.exceptions.handlers import global_exception_handler, log_request_middleware, BybitTraderException
+from core.security.middleware import rate_limiting_middleware, input_validation_middleware, security_headers_middleware
 from models.signal_model import SignalResponse, DemoSettingsRequest
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -77,6 +78,19 @@ app.add_exception_handler(Exception, global_exception_handler)
 @app.middleware("http")
 async def add_request_logging(request: Request, call_next):
     return await log_request_middleware(request, call_next)
+
+# Add security middlewares
+@app.middleware("http")
+async def add_rate_limiting(request: Request, call_next):
+    return await rate_limiting_middleware(request, call_next)
+
+@app.middleware("http")
+async def add_input_validation(request: Request, call_next):
+    return await input_validation_middleware(request, call_next)
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    return await security_headers_middleware(request, call_next)
 
 class KlineResponse(BaseModel):
     startTime: str

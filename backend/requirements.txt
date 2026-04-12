@@ -9,8 +9,11 @@ scikit-learn
 tensorflow
 bybit-api
 python-dotenv
+pydantic[dotenv]
 pydantic
 pytest
+pytest-asyncio
+pytest-cov
 mypy
 flake8
 black
