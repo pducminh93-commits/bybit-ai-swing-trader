@@ -17,6 +17,8 @@ pytest-cov
 mypy
 flake8
 black
+prometheus-fastapi-instrumentator
+uvloop
 aiocache
 sqlalchemy
 celery[redis]

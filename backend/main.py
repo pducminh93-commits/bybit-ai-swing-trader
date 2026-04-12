@@ -15,6 +15,12 @@ from infrastructure.database_service import DatabaseService
 from core.logging.config import get_logger
 from core.exceptions.handlers import global_exception_handler, log_request_middleware, BybitTraderException
 from core.security.middleware import rate_limiting_middleware, input_validation_middleware, security_headers_middleware
+from core.config.settings import get_settings
+
+# Prometheus metrics
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
+
+settings = get_settings()
 from models.signal_model import SignalResponse, DemoSettingsRequest
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -33,8 +39,13 @@ async def lifespan(app: FastAPI):
         from core.database.config import db
         await db.create_tables()
         logger.info("Database initialized successfully")
+
+        # Initialize Prometheus metrics
+        instrumentator = Instrumentator().instrument(app)
+        logger.info("Prometheus metrics initialized")
+
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize application: {e}")
         raise
 
     yield
@@ -693,6 +704,16 @@ async def get_statistics():
     except Exception as e:
         logger.error(f"Failed to get statistics: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get statistics: {str(e)}")
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": settings.app.version
+    }
 
 @app.get("/")
 async def root():
