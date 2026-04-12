@@ -19,6 +19,10 @@ flake8
 black
 prometheus-fastapi-instrumentator
 uvloop
+websockets
+scikit-learn
+xgboost
+lightgbm
 aiocache
 sqlalchemy
 celery[redis]
