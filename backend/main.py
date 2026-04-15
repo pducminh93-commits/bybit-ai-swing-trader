@@ -573,7 +573,13 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
     # Run backtest
     backtest_start = time.time()
     logger.info(f"Running backtest with {len(signals_data)} signals and {len(price_data)} price points")
-    backtester = Backtester(initial_balance=100, leverage=leverage, min_hold_candles=min_hold_candles, stop_loss_pct=stop_loss_pct)
+    backtester = Backtester(
+        initial_balance=100,
+        leverage=leverage,
+        min_hold_candles=min_hold_candles,
+        stop_loss_pct=stop_loss_pct,
+        max_position_pct=1.0  # Allow up to 100% of capital per position
+    )
     results = backtester.run_backtest(signals_data, price_data, symbol)
     backtest_time = time.time() - backtest_start
     logger.info(f"Backtest completed in {backtest_time:.2f}s: final_balance={results['final_balance']:.2f}, total_return={results['total_return']:.2f}%")
