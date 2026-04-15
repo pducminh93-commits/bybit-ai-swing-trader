@@ -582,7 +582,19 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
     )
     results = backtester.run_backtest(signals_data, price_data, symbol)
     backtest_time = time.time() - backtest_start
-    logger.info(f"Backtest completed in {backtest_time:.2f}s: final_balance={results['final_balance']:.2f}, total_return={results['total_return']:.2f}%")
+    # Handle both old and new backtester result structures
+    if 'final_balance' in results:
+        # New structure - metrics are returned directly
+        final_balance = results.get('final_balance', 0)
+        total_return_pct = results.get('total_return_pct', 0)
+        metrics = results  # All data is already at top level
+    else:
+        # Old structure - extract from nested structure
+        final_balance = results.get('final_balance', 0)
+        total_return_pct = results.get('total_return', 0)
+        metrics = results.get('metrics', {})
+
+    logger.info(f"Backtest completed in {backtest_time:.2f}s: final_balance={final_balance:.2f}, total_return={total_return_pct:.2f}%")
 
     # Save results to database
     save_start = time.time()
@@ -599,13 +611,11 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
             'stop_loss_pct': stop_loss_pct
         }
         results['initial_balance'] = 100.0
-        results['total_return_pct'] = results.get('total_return', 0.0)
+        results['total_return_pct'] = total_return_pct
 
-        # Extract metrics with defaults to ensure all keys exist
+        # Ensure all required keys exist with defaults
         logger.info(f"Raw results before extraction: {results}")
-        metrics = results.get('metrics', {})
-        logger.info(f"Metrics dict: {metrics}")
-        logger.info(f"Metrics keys: {list(metrics.keys()) if metrics else 'No metrics'}")
+        logger.info(f"Final results keys: {list(results.keys())}")
 
         results['total_trades'] = metrics.get('total_trades', 0)
         results['winning_trades'] = metrics.get('winning_trades', 0)
