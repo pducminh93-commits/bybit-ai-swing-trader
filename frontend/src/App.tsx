@@ -153,16 +153,44 @@ export default function App() {
       setScanProgress(100);
 
       // Auto-process signals for demo if demo is running
-      if (demoStatus?.is_running && signalData.length > 0) {
+      let currentDemoStatus = demoStatus;
+
+      // If demoStatus is not loaded yet, try to load it
+      if (!currentDemoStatus) {
         try {
+          currentDemoStatus = await getDemoStatus();
+          setDemoStatus(currentDemoStatus);
+        } catch (statusErr) {
+          console.warn("Failed to load demo status for auto-processing:", statusErr);
+        }
+      }
+
+      if (currentDemoStatus?.is_running && signalData.length > 0) {
+        try {
+          console.log("Auto-processing signals for demo:", signalData.length, "signals");
           const result = await processDemoSignals(signalData);
+          console.log("Demo processing result:", result);
+
           if (result.count > 0) {
+            // Show success message
+            console.log(`✅ Successfully processed ${result.count} signals for demo trading`);
+
             // Refresh demo data after processing
-            loadDemoData();
+            await loadDemoData();
+            console.log("Demo data refreshed after processing");
+
+            // Optional: Show a brief success indicator (you could add a toast notification here)
+          } else {
+            console.log("No signals were executed by demo (possibly due to filters or existing positions)");
           }
         } catch (demoErr) {
           console.error("Failed to process demo signals:", demoErr);
+          setError("Failed to process signals for demo trading");
         }
+      } else if (currentDemoStatus && !currentDemoStatus.is_running) {
+        console.log("Demo is not running, skipping auto-processing");
+      } else {
+        console.log("No demo status available or no signals to process");
       }
     } catch (err) {
       console.error(err);
@@ -304,7 +332,20 @@ export default function App() {
     }
   };
 
-  // Load demo data when tab is active
+  // Load demo status on mount (needed for auto-processing signals)
+  useEffect(() => {
+    const loadDemoStatusOnly = async () => {
+      try {
+        const status = await getDemoStatus();
+        setDemoStatus(status);
+      } catch (err) {
+        console.warn("Failed to load demo status:", err);
+      }
+    };
+    loadDemoStatusOnly();
+  }, []);
+
+  // Load full demo data when tab is active
   useEffect(() => {
     if (activeTab === "demo") {
       loadDemoData();

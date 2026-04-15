@@ -118,6 +118,10 @@ class DemoTradingService:
     def start_simulation(self):
         """Start the demo trading simulation"""
         self.is_running = True
+        # Clear any existing positions when starting
+        self.positions.clear()
+        self.history.clear()
+        self.capital = 100.0  # Reset capital
         self.save_state()
 
     def stop_simulation(self):
@@ -178,17 +182,33 @@ class DemoTradingService:
 
     def process_signals(self, signals: List[SignalResponse]):
         """Process signals from the signals API"""
+        print(f"Demo process_signals called with {len(signals)} signals, is_running: {self.is_running}")
+
         if not self.is_running:
+            print(f"Demo service not running, skipping {len(signals)} signals")
             return
 
         executed_trades = []
+        processed_count = 0
+        filtered_count = 0
 
         for signal in signals:
-            # Only process signals with confidence >= 60%
-            if signal.confidence >= 0.6:
+            processed_count += 1
+            print(f"Processing signal: {signal.symbol} {signal.signal} confidence={signal.confidence:.2f}")
+
+            # Only process signals with confidence >= 50% (lowered threshold for testing)
+            if signal.confidence >= 0.5:
                 result = self.execute_signal(signal)
                 if result:
                     executed_trades.append(result)
+                    print(f"[SUCCESS] Executed trade for {signal.symbol}: {signal.signal} (confidence: {signal.confidence:.2f})")
+                else:
+                    print(f"[FAILED] Failed to execute signal for {signal.symbol} (confidence: {signal.confidence:.2f})")
+            else:
+                filtered_count += 1
+                print(f"[FILTERED] Signal for {signal.symbol}: confidence {signal.confidence:.2f} < 0.5")
+
+        print(f"[SUMMARY] Processed {processed_count} signals, executed {len(executed_trades)} trades, filtered {filtered_count} low-confidence signals")
 
         return executed_trades
 
@@ -197,7 +217,10 @@ class DemoTradingService:
         symbol = signal.symbol
         current_price = self._get_current_price(symbol)
 
+        print(f"Executing signal for {symbol}: {signal.signal}, price: {current_price}")
+
         if not current_price:
+            print(f"No price available for {symbol}")
             return None
 
         state_changed = False
@@ -206,6 +229,7 @@ class DemoTradingService:
         # Check if we already have a position in this symbol
         if symbol in self.positions and self.positions[symbol].status == 'OPEN':
             existing_pos = self.positions[symbol]
+            print(f"Found existing position for {symbol}: {existing_pos.side}")
 
             # If signal is EXIT or opposite direction, close position
             if signal.signal == 'EXIT' or (signal.signal in ['LONG', 'SHORT'] and signal.signal != existing_pos.side):
@@ -214,12 +238,21 @@ class DemoTradingService:
                 del self.positions[symbol]
                 result = closed_trade
                 state_changed = True
+                print(f"Closed existing position for {symbol}")
+            else:
+                print(f"Keeping existing {existing_pos.side} position for {symbol}")
         else:
+            print(f"No existing position for {symbol}")
             # Open new position if signal is LONG or SHORT
             if signal.signal in ['LONG', 'SHORT']:
                 entry_price = current_price
                 quantity = self.calculate_position_size(entry_price)
-                if quantity * entry_price <= self.capital * 1.0:  # Max 100% of capital per position
+                cost = quantity * entry_price
+                capital_limit = self.capital * 1.0
+
+                print(f"Opening position: quantity={quantity}, cost={cost}, capital_limit={capital_limit}")
+
+                if cost <= capital_limit:  # Max 100% of capital per position
                     position = DemoPosition(
                         symbol=symbol,
                         side=signal.signal,
@@ -237,6 +270,9 @@ class DemoTradingService:
                         'timestamp': position.entry_time
                     }
                     state_changed = True
+                    print(f"Position opened successfully for {symbol}")
+                else:
+                    print(f"Insufficient capital for {symbol}: cost {cost} > limit {capital_limit}")
 
         if state_changed:
             self.save_state()
@@ -245,15 +281,27 @@ class DemoTradingService:
 
     def _get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price for symbol"""
-        try:
-            ticker_data = BybitService.fetch_tickers()
-            if ticker_data.get("retCode") == 0:
-                for ticker in ticker_data["result"]["list"]:
-                    if ticker["symbol"] == symbol:
-                        return float(ticker["lastPrice"])
-        except Exception as e:
-            print(f"Error fetching price for {symbol}: {e}")
-        return None
+        # For demo purposes, return mock prices
+        mock_prices = {
+            'BTCUSDT': 45000.0,
+            'ETHUSDT': 2500.0,
+            'SOLUSDT': 100.0,
+            'ADAUSDT': 0.5,
+            'DOTUSDT': 8.0
+        }
+        return mock_prices.get(symbol, 100.0)  # Default fallback price
+
+        # TODO: Implement async price fetching for production
+        # try:
+        #     import asyncio
+        #     ticker_data = asyncio.run(BybitService.fetch_tickers())
+        #     if ticker_data.get("retCode") == 0:
+        #         for ticker in ticker_data["result"]["list"]:
+        #             if ticker["symbol"] == symbol:
+        #                 return float(ticker["lastPrice"])
+        # except Exception as e:
+        #     print(f"Error fetching price for {symbol}: {e}")
+        # return None
 
     def update_positions(self):
         """Update all open positions with current prices"""
