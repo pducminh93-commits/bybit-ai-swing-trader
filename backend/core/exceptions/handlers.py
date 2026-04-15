@@ -78,12 +78,12 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             }
         )
 
-def log_request_middleware(request: Request, call_next):
+async def log_request_middleware(request: Request, call_next):
     """Middleware to log requests"""
     logger.info(f"Request: {request.method} {request.url.path}")
 
     try:
-        response = call_next(request)
+        response = await call_next(request)
         logger.info(f"Response: {response.status_code} for {request.method} {request.url.path}")
         return response
     except Exception as e:

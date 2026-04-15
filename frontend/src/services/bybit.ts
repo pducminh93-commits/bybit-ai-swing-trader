@@ -158,3 +158,13 @@ export const runBacktest = async (symbol: string, days: number = 30): Promise<an
   });
   return response.data;
 };
+
+export const checkBackendConnection = async (): Promise<boolean> => {
+  try {
+    const response = await axios.get("http://localhost:8000/health", { timeout: 5000 });
+    return response.status === 200;
+  } catch (error) {
+    console.error("Backend connection check failed:", error);
+    return false;
+  }
+};

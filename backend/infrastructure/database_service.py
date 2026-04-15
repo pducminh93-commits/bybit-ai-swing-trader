@@ -3,9 +3,12 @@ from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 import json
+import logging
 
 from core.database.config import db
 from core.models.models import BacktestResult, Trade, Signal, MLModel
+
+logger = logging.getLogger(__name__)
 
 class DatabaseService:
     """Service for database operations"""
@@ -24,23 +27,65 @@ class DatabaseService:
     @staticmethod
     async def save_backtest_result(backtest_data: Dict[str, Any], symbol: str) -> int:
         """Save backtest result to database"""
+        logger.info(f"save_backtest_result called with symbol: {symbol}")
+        logger.info(f"backtest_data keys: {list(backtest_data.keys())}")
+        logger.info(f"backtest_data losing_trades: {backtest_data.get('losing_trades', 'NOT_FOUND')}")
+        logger.info(f"backtest_data total_trades: {backtest_data.get('total_trades', 'NOT_FOUND')}")
+        logger.info(f"backtest_data winning_trades: {backtest_data.get('winning_trades', 'NOT_FOUND')}")
+
+        # Ensure required fields have defaults
+        backtest_data.setdefault('initial_balance', 100.0)
+        backtest_data.setdefault('final_balance', 100.0)
+        backtest_data.setdefault('total_return_pct', 0.0)
+        backtest_data.setdefault('total_trades', 0)
+        backtest_data.setdefault('winning_trades', 0)
+        backtest_data.setdefault('losing_trades', 0)
+        backtest_data.setdefault('win_rate', 0.0)
+        backtest_data.setdefault('profit_factor', 0.0)
+        backtest_data.setdefault('max_drawdown_pct', 0.0)
+        backtest_data.setdefault('leverage', 1.0)
+        backtest_data.setdefault('stop_loss_pct', 0.05)
+        backtest_data.setdefault('min_hold_candles', 6)
+
+        # Validate datetime fields
+        def validate_datetime(dt, field_name):
+            if isinstance(dt, datetime):
+                try:
+                    # Check basic ranges and try to access attributes to ensure validity
+                    if not (1 <= dt.month <= 12 and 1 <= dt.day <= 31 and dt.year >= 1900 and dt.year <= 2100):
+                        logger.error(f"Invalid {field_name} range: {dt} (month={dt.month}, day={dt.day}, year={dt.year})")
+                        return datetime.utcnow()
+                    # Try to access attributes to catch any internal issues
+                    _ = dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+                    # Try to format it to ensure it's valid
+                    dt.isoformat()
+                except (ValueError, AttributeError, OverflowError) as e:
+                    logger.error(f"Invalid {field_name}: {dt} - {e}")
+                    return datetime.utcnow()
+            return dt
+
+        backtest_data['start_date'] = validate_datetime(backtest_data.get('start_date'), 'start_date')
+        backtest_data['end_date'] = validate_datetime(backtest_data.get('end_date'), 'end_date')
+
         async with db.async_session() as session:
             try:
-                # Create backtest result record
+                # Create backtest result record with defensive programming
+                logger.info(f"About to create BacktestResult with start_date: {backtest_data.get('start_date')} (type: {type(backtest_data.get('start_date'))})")
+                logger.info(f"end_date: {backtest_data.get('end_date')} (type: {type(backtest_data.get('end_date'))})")
                 backtest = BacktestResult(
                     symbol=symbol,
                     strategy_name=backtest_data.get('strategy_name', 'AI Swing Trader'),
                     start_date=datetime.fromisoformat(backtest_data['start_date']) if isinstance(backtest_data.get('start_date'), str) else backtest_data.get('start_date'),
                     end_date=datetime.fromisoformat(backtest_data['end_date']) if isinstance(backtest_data.get('end_date'), str) else backtest_data.get('end_date'),
-                    initial_balance=backtest_data['initial_balance'],
-                    final_balance=backtest_data['final_balance'],
-                    total_return_pct=backtest_data['total_return_pct'],
-                    total_trades=backtest_data['total_trades'],
-                    winning_trades=backtest_data['winning_trades'],
-                    losing_trades=backtest_data['losing_trades'],
-                    win_rate=backtest_data['win_rate'],
-                    profit_factor=backtest_data['profit_factor'],
-                    max_drawdown_pct=backtest_data['max_drawdown_pct'],
+                    initial_balance=backtest_data.get('initial_balance', 100.0),
+                    final_balance=backtest_data.get('final_balance', 100.0),
+                    total_return_pct=backtest_data.get('total_return_pct', 0.0),
+                    total_trades=backtest_data.get('total_trades', 0),
+                    winning_trades=backtest_data.get('winning_trades', 0),
+                    losing_trades=backtest_data.get('losing_trades', 0),
+                    win_rate=backtest_data.get('win_rate', 0.0),
+                    profit_factor=backtest_data.get('profit_factor', 0.0),
+                    max_drawdown_pct=backtest_data.get('max_drawdown_pct', 0.0),
                     sharpe_ratio=backtest_data.get('sharpe_ratio'),
                     sortino_ratio=backtest_data.get('sortino_ratio'),
                     avg_win_pct=backtest_data.get('avg_win_pct'),
@@ -54,28 +99,54 @@ class DatabaseService:
                     min_hold_candles=backtest_data.get('min_hold_candles', 6),
                     config=backtest_data.get('config')
                 )
+                logger.info("BacktestResult created successfully")
 
                 session.add(backtest)
+                logger.info("Backtest added to session")
                 await session.flush()  # Get the ID
 
                 # Save trades if available
                 if 'trades' in backtest_data and backtest_data['trades']:
                     for trade_data in backtest_data['trades']:
+                        # Validate required trade fields
+                        required_fields = ['symbol', 'side', 'entry_price', 'exit_price', 'quantity', 'realized_pnl', 'realized_pnl_pct']
+                        missing_fields = [field for field in required_fields if field not in trade_data]
+                        if missing_fields:
+                            logger.warning(f"Skipping trade with missing fields: {missing_fields}")
+                            continue
+
+                        # Validate datetime fields
+                        def validate_trade_datetime(dt, field_name):
+                            if isinstance(dt, datetime):
+                                try:
+                                    if not (1 <= dt.month <= 12 and 1 <= dt.day <= 31 and dt.year >= 1900 and dt.year <= 2100):
+                                        logger.error(f"Invalid trade {field_name} range: {dt} (month={dt.month}, day={dt.day}, year={dt.year})")
+                                        return datetime.utcnow()
+                                    _ = dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+                                    dt.isoformat()
+                                except (ValueError, AttributeError, OverflowError) as e:
+                                    logger.error(f"Invalid trade {field_name}: {dt} - {e}")
+                                    return datetime.utcnow()
+                            return dt
+
+                        entry_time = validate_trade_datetime(trade_data.get('entry_time'), 'entry_time')
+                        exit_time = validate_trade_datetime(trade_data.get('exit_time'), 'exit_time')
+
                         trade = Trade(
                             backtest_id=backtest.id,
-                            symbol=trade_data['symbol'],
-                            side=trade_data['side'],
-                            entry_time=datetime.fromisoformat(trade_data['entry_time']) if isinstance(trade_data.get('entry_time'), str) else trade_data.get('entry_time'),
-                            exit_time=datetime.fromisoformat(trade_data['exit_time']) if isinstance(trade_data.get('exit_time'), str) else trade_data.get('exit_time'),
-                            entry_price=trade_data['entry_price'],
-                            exit_price=trade_data['exit_price'],
-                            quantity=trade_data['quantity'],
+                            symbol=trade_data.get('symbol', symbol),  # fallback to backtest symbol
+                            side=trade_data.get('side', 'UNKNOWN'),
+                            entry_time=datetime.fromisoformat(trade_data['entry_time']) if isinstance(trade_data.get('entry_time'), str) else entry_time,
+                            exit_time=datetime.fromisoformat(trade_data['exit_time']) if isinstance(trade_data.get('exit_time'), str) else exit_time,
+                            entry_price=trade_data.get('entry_price', 0.0),
+                            exit_price=trade_data.get('exit_price', 0.0),
+                            quantity=trade_data.get('quantity', 0.0),
                             leverage=trade_data.get('leverage', 1.0),
-                            realized_pnl=trade_data['realized_pnl'],
-                            realized_pnl_pct=trade_data['realized_pnl_pct'],
-                            holding_period=trade_data['holding_period'],
-                            entry_reason=trade_data.get('entry_reason'),
-                            exit_reason=trade_data.get('exit_reason'),
+                            realized_pnl=trade_data.get('realized_pnl', 0.0),
+                            realized_pnl_pct=trade_data.get('realized_pnl_pct', 0.0),
+                            holding_period=trade_data.get('holding_period', 1),
+                            entry_reason=trade_data.get('entry_reason', ''),
+                            exit_reason=trade_data.get('exit_reason', ''),
                             stop_loss_price=trade_data.get('stop_loss_price'),
                             take_profit_price=trade_data.get('take_profit_price'),
                             max_adverse_excursion=trade_data.get('max_adverse_excursion'),
@@ -83,10 +154,16 @@ class DatabaseService:
                         )
                         session.add(trade)
 
+                logger.info("Committing session...")
                 await session.commit()
+                logger.info(f"Backtest saved successfully with ID: {backtest.id}")
                 return backtest.id
 
             except Exception as e:
+                logger.error(f"Failed to save backtest: {e}")
+                logger.error(f"Exception type: {type(e)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 await session.rollback()
                 raise e
 

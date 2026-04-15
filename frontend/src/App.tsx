@@ -30,6 +30,7 @@ import {
   trainMlModel,
   trainUniversalModel,
   runBacktest,
+  checkBackendConnection,
   DemoPosition,
   DemoTrade,
   DemoStatus
@@ -40,7 +41,7 @@ export default function App() {
   const [tickers, setTickers] = useState<any[]>([]);
   const [signals, setSignals] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"signals" | "demo" | "training">("signals");
+  const [activeTab, setActiveTab] = useState<"signals" | "demo" | "training" | "backtest">("signals");
   const [signalsTab, setSignalsTab] = useState<"list" | "settings">("list");
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -111,6 +112,15 @@ export default function App() {
   useEffect(() => {
     const loadTickers = async () => {
       try {
+        setError(null); // Clear any previous errors
+
+        // First check if backend is available
+        const isConnected = await checkBackendConnection();
+        if (!isConnected) {
+          setError("Cannot connect to backend server. Please start the backend server on port 8000.");
+          return;
+        }
+
         const data = await fetchTickers();
         const top10 = data
           .filter(t => t.symbol.endsWith("USDT"))
@@ -118,8 +128,13 @@ export default function App() {
           .slice(0, 10);
         setTickers(top10);
       } catch (err) {
-        console.error(err);
-        setError("Failed to load market data");
+        console.error("Failed to load market data:", err);
+        // Check if it's a connection error
+        if (err.message?.includes('Network Error') || err.message?.includes('ECONNREFUSED')) {
+          setError("Cannot connect to backend server. Please ensure the backend is running on port 8000.");
+        } else {
+          setError("Failed to load market data. Please check your internet connection and try again.");
+        }
       }
     };
     loadTickers();
@@ -412,7 +427,7 @@ export default function App() {
               </div>
 
               {/* Training */}
-              <div 
+              <div
                 onClick={() => setActiveTab("training")}
                 className={cn(
                   "flex items-center gap-2 cursor-pointer group transition-all",
@@ -427,6 +442,24 @@ export default function App() {
                   "text-xs font-black tracking-widest uppercase transition-colors",
                   activeTab === "training" ? "text-zinc-100" : "text-zinc-400 group-hover:text-zinc-200"
                 )}>Training</span>
+              </div>
+
+              {/* Backtest */}
+              <div
+                onClick={() => setActiveTab("backtest")}
+                className={cn(
+                  "flex items-center gap-2 cursor-pointer group transition-all",
+                  activeTab === "backtest" ? "opacity-100" : "opacity-40 hover:opacity-80"
+                )}
+              >
+                <div className={cn(
+                  "w-2 h-2 rounded-full",
+                  activeTab === "backtest" ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" : "bg-zinc-600"
+                )} />
+                <span className={cn(
+                  "text-xs font-black tracking-widest uppercase transition-colors",
+                  activeTab === "backtest" ? "text-zinc-100" : "text-zinc-400 group-hover:text-zinc-200"
+                )}>Backtest</span>
               </div>
 
               <div className="h-4 w-[1px] bg-zinc-800 hidden md:block" />
@@ -1013,6 +1046,23 @@ export default function App() {
                 </CardContent>
               </Card>
 
+
+            </div>
+            
+            <div className="text-center text-zinc-500 text-sm">
+              <p>Training generates new models based on historical patterns to improve prediction accuracy.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Backtest Tab */}
+        {activeTab === "backtest" && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Historical Backtesting</h2>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Historical Backtesting */}
               <Card className="bg-zinc-900/50 border-zinc-800">
                 <CardHeader>
@@ -1119,11 +1169,31 @@ export default function App() {
                   )}
                 </CardContent>
               </Card>
+
+              {/* Backtest History/Results */}
+              <Card className="bg-zinc-900/50 border-zinc-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5" />
+                    Backtest Results
+                  </CardTitle>
+                  <CardDescription>View and analyze historical backtest performance</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="text-center text-zinc-400 py-8">
+                    <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-sm">Backtest results will appear here</p>
+                    <p className="text-xs text-zinc-500 mt-2">Run a backtest to see detailed analysis</p>
+                  </div>
+
+                  {/* Future: Add backtest history list here */}
+                </CardContent>
+              </Card>
             </div>
-            
+
             <div className="text-center text-zinc-500 text-sm">
-              <p>Training generates new models based on historical patterns to improve prediction accuracy.</p>
-              <p>Backtesting simulates past trading performance over the specified time period.</p>
+              <p>Backtesting simulates past trading performance to evaluate strategy effectiveness.</p>
+              <p>Use historical data to optimize parameters and validate trading signals.</p>
             </div>
           </div>
         )}

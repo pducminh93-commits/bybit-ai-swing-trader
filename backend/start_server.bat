@@ -1,0 +1,35 @@
+@echo off
+REM Start Bybit AI Swing Trader Backend
+echo Starting Bybit AI Swing Trader Backend...
+
+REM Check if Python is available
+python --version >nul 2>&1
+if errorlevel 1 (
+    echo Python is not installed. Please install Python 3.8+ to continue.
+    pause
+    exit /b 1
+)
+
+REM Check if we're in the correct directory
+if not exist "main.py" (
+    echo main.py not found. Please run this script from the backend directory.
+    pause
+    exit /b 1
+)
+
+REM Install dependencies if requirements.txt exists
+if exist "requirements.txt" (
+    echo Installing Python dependencies...
+    pip install -r requirements.txt
+)
+
+REM Initialize database if needed
+echo Initializing database...
+python init_db.py
+
+REM Start the server
+echo Starting server on http://localhost:8000
+echo Press Ctrl+C to stop the server
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+pause

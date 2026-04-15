@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -164,7 +164,7 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
         if use_multiframe:
             # Use multi-timeframe analysis
             mtf_analysis = MultiTimeframeAnalysis(symbol)
-            mtf_results = mtf_analysis.analyze_all_timeframes()
+            mtf_results = await mtf_analysis.analyze_all_timeframes()
             aggregated_signal = mtf_analysis.get_aggregated_signal()
 
             # Get detailed indicators from 4h timeframe
@@ -251,7 +251,7 @@ async def get_signal(symbol: str, use_multiframe: bool = True) -> SignalResponse
                 indicators=result["features"],
                 timestamp=result["timestamp"] or datetime.utcnow().isoformat()
             )
-    except requests.RequestException as e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating signal: {str(e)}")
 
 @app.get("/api/signals")
@@ -411,20 +411,57 @@ async def get_backtest_status(task_id: str):
     return response
 
 def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_candles: int = 6, stop_loss_pct: float = 0.05):
-    # Fetch historical data (tăng limit lên để lấy đủ lịch sử tính toán)
-    kline_data = asyncio.run(BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000)))  # 6 candles per day + 100 for indicators buffer
-    if kline_data.get("retCode") != 0:
-        raise ValueError("Failed to fetch historical data")
+    import time
+    start_time = time.time()
 
-    klines = kline_data["result"]["list"][::-1] # Đảo ngược từ quá khứ -> hiện tại
-    
-    # CỐ GẮNG KÉO THÊM DỮ LIỆU OI & FUNDING (MAX 200 CỦA BYBIT) CHO BACKTEST UNIVERSAL MODEL
     try:
-        oi_data = BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500).get('result', {}).get('list', [])
-        fr_data = BybitService.fetch_funding_rate_history(symbol, limit=500).get('result', {}).get('list', [])
-    except:
+        logger.info(f"Starting backtest for {symbol}, days={days}")
+        # Fetch historical data in parallel for better performance
+        import asyncio
+
+        async def fetch_all_data():
+            # Run API calls in parallel
+            kline_task = BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000))
+            oi_task = BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500)
+            fr_task = BybitService.fetch_funding_rate_history(symbol, limit=500)
+
+            results = await asyncio.gather(kline_task, oi_task, fr_task, return_exceptions=True)
+
+            kline_data = results[0]
+            oi_result = results[1]
+            fr_result = results[2]
+
+            return kline_data, oi_result, fr_result
+
+        data_fetch_start = time.time()
+        kline_data, oi_result, fr_result = asyncio.run(fetch_all_data())
+        data_fetch_time = time.time() - data_fetch_start
+        logger.info(f"Data fetching completed in {data_fetch_time:.2f}s")
+
+        if isinstance(kline_data, Exception):
+            raise ValueError(f"Failed to fetch historical data: {str(kline_data)}")
+        if kline_data.get("retCode") != 0:
+            raise ValueError(f"Failed to fetch historical data: {kline_data.get('retMsg', 'Unknown error')}")
+
+        klines = kline_data["result"]["list"][::-1] # Đảo ngược từ quá khứ -> hiện tại
+        logger.info(f"Fetched {len(klines)} klines for {symbol}")
+
+        # Extract OI and funding data
         oi_data = []
         fr_data = []
+        if not isinstance(oi_result, Exception):
+            oi_data = oi_result.get('result', {}).get('list', [])
+        else:
+            logger.warning(f"Failed to fetch OI data: {oi_result}")
+
+        if not isinstance(fr_result, Exception):
+            fr_data = fr_result.get('result', {}).get('list', [])
+        else:
+            logger.warning(f"Failed to fetch funding rate data: {fr_result}")
+
+    except Exception as e:
+        logger.error(f"Failed during data fetching for {symbol}: {str(e)}")
+        raise
 
     # Generate signals for each period
     signals_data = []
@@ -432,18 +469,48 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
 
     from services.ml_model import MLSignalPredictor
     from services.feature_engineering import FeatureEngineer
-    
-    predictor = MLSignalPredictor()
-    has_model = predictor._load_model(symbol)
+
+    # Cache ML models to avoid reloading on each backtest
+    if not hasattr(_run_backtest_sync, '_model_cache'):
+        _run_backtest_sync._model_cache = {}
+
+    cache_key = f"{symbol}_ml_model"
+    if cache_key in _run_backtest_sync._model_cache:
+        predictor, has_model = _run_backtest_sync._model_cache[cache_key]
+        logger.info(f"Using cached ML model for {symbol}")
+    else:
+        predictor = MLSignalPredictor()
+        has_model = predictor._load_model(symbol)
+        _run_backtest_sync._model_cache[cache_key] = (predictor, has_model)
+        logger.info(f"Loaded ML model for {symbol}, cached: {has_model}")
 
     start_idx = 50
     if len(klines) <= start_idx:
         raise ValueError("Not enough historical data for backtesting")
 
-    # TỐI ƯU HÓA: Tính toán FeatureEngineer 1 LẦN DUY NHẤT cho toàn bộ chuỗi thời gian
+    # OPTIMIZATION: Pre-calculate indicators for all timestamps to avoid repeated calculations
+    indicator_calc_start = time.time()
+    logger.info("Pre-calculating indicators for all timestamps...")
+    indicators_cache = {}
+
+    for i in range(start_idx, len(klines)):
+        current_kline = klines[i]
+        timestamp = current_kline[0]
+
+        # Check if we already calculated indicators for this timestamp
+        if timestamp not in indicators_cache:
+            # Calculate indicators with appropriate window
+            history_window = klines[max(0, i-100):i+1]
+            ta = TechnicalAnalysis(history_window)
+            indicators_cache[timestamp] = ta.calculate_indicators()
+
+    indicator_calc_time = time.time() - indicator_calc_start
+    logger.info(f"Pre-calculated indicators for {len(indicators_cache)} timestamps in {indicator_calc_time:.2f}s")
+
+    # TỐI ƯU HÓA: Tính toán FeatureEngineer 1 LẦN DUY NHẤT cho toàn bộ chuỗi thời gian (nếu có universal model)
     is_universal = has_model and len(predictor.feature_columns) == 20
     master_df = None
-    
+
     if is_universal:
         eng = FeatureEngineer(klines, oi_data, fr_data)
         master_df = eng.generate_all_features()
@@ -451,29 +518,27 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
         if not master_df.empty:
             import pandas as pd
             # Chuyển đổi an toàn từ DatetimeIndex -> int64 (nanoseconds) -> int (milliseconds) -> str
-            # pd.to_numeric() chuyển DatetimeIndex về int64 (ns). Nên cần chia cho 10**6 (1 triệu) để về ms
             master_df.index = (pd.to_numeric(master_df.index) // 10**6).astype(str)
+
+    signal_gen_start = time.time()
+    logger.info(f"Generating signals for {len(klines) - start_idx} periods...")
 
     for i in range(start_idx, len(klines)):
         current_kline = klines[i]
         timestamp = current_kline[0]
         current_price = float(current_kline[4])
-        
+
         indicators = {}
         if is_universal and master_df is not None:
             # Look up features pre-calculated for this specific timestamp
             if timestamp in master_df.index:
                 indicators = master_df.loc[timestamp].to_dict()
             else:
-                # Fallback if timestamp missing due to DropNA
-                history_window = klines[max(0, i-100):i+1] 
-                ta = TechnicalAnalysis(history_window)
-                indicators = ta.calculate_indicators()
+                # Fallback to cached indicators
+                indicators = indicators_cache.get(timestamp, {})
         else:
-            # NẾU LÀ LOCAL MODEL CŨ (Hoặc chưa có)
-            history_window = klines[max(0, i-100):i+1] 
-            ta = TechnicalAnalysis(history_window)
-            indicators = ta.calculate_indicators()
+            # Use pre-calculated indicators
+            indicators = indicators_cache.get(timestamp, {})
 
         # Gọi não bộ ML (Nếu đã train) hoặc Logic cũ
         if has_model:
@@ -489,6 +554,7 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
             confidence = signal_out['confidence']
             reason = signal_out['reason']
 
+        # Generate signals for each period
         signals_data.append({
             'timestamp': timestamp,
             'signal': final_signal,
@@ -501,29 +567,71 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
             'close': current_price
         })
 
+    signal_gen_time = time.time() - signal_gen_start
+    logger.info(f"Signal generation completed in {signal_gen_time:.2f}s for {len(signals_data)} signals")
+
     # Run backtest
+    backtest_start = time.time()
+    logger.info(f"Running backtest with {len(signals_data)} signals and {len(price_data)} price points")
     backtester = Backtester(initial_balance=100, leverage=leverage, min_hold_candles=min_hold_candles, stop_loss_pct=stop_loss_pct)
-    results = backtester.run_backtest(signals_data, price_data)
+    results = backtester.run_backtest(signals_data, price_data, symbol)
+    backtest_time = time.time() - backtest_start
+    logger.info(f"Backtest completed in {backtest_time:.2f}s: final_balance={results['final_balance']:.2f}, total_return={results['total_return']:.2f}%")
 
     # Save results to database
+    save_start = time.time()
     try:
         # Add metadata to results
         results['symbol'] = symbol
         results['strategy_name'] = 'AI Swing Trader'
         from datetime import timedelta
-        results['start_date'] = (datetime.utcnow() - timedelta(days=days)).isoformat()
-        results['end_date'] = datetime.utcnow().isoformat()
+        results['start_date'] = datetime.utcnow() - timedelta(days=days)
+        results['end_date'] = datetime.utcnow()
         results['config'] = {
             'leverage': leverage,
             'min_hold_candles': min_hold_candles,
             'stop_loss_pct': stop_loss_pct
         }
+        results['initial_balance'] = 100.0
+        results['total_return_pct'] = results.get('total_return', 0.0)
+
+        # Extract metrics with defaults to ensure all keys exist
+        logger.info(f"Raw results before extraction: {results}")
+        metrics = results.get('metrics', {})
+        logger.info(f"Metrics dict: {metrics}")
+        logger.info(f"Metrics keys: {list(metrics.keys()) if metrics else 'No metrics'}")
+
+        results['total_trades'] = metrics.get('total_trades', 0)
+        results['winning_trades'] = metrics.get('winning_trades', 0)
+        results['losing_trades'] = metrics.get('losing_trades', 0)
+        results['win_rate'] = metrics.get('win_rate', 0.0)
+        results['profit_factor'] = metrics.get('profit_factor', 0.0)
+        results['max_drawdown_pct'] = metrics.get('max_drawdown', 0.0)
+        results['sharpe_ratio'] = metrics.get('sharpe_ratio')
+        results['sortino_ratio'] = metrics.get('sortino_ratio')
+        results['avg_win_pct'] = metrics.get('avg_win_pct')
+        results['avg_loss_pct'] = metrics.get('avg_loss_pct')
+        results['largest_win_pct'] = metrics.get('largest_win_pct')
+        results['largest_loss_pct'] = metrics.get('largest_loss_pct')
+        results['avg_holding_period'] = metrics.get('avg_holding_period')
+        results['max_holding_period'] = metrics.get('max_holding_period')
+
+        # Log extracted values
+        logger.info(f"Extracted losing_trades: {results.get('losing_trades', 'NOT_FOUND')}")
+        logger.info(f"Extracted total_trades: {results.get('total_trades', 'NOT_FOUND')}")
+        logger.info(f"Extracted winning_trades: {results.get('winning_trades', 'NOT_FOUND')}")
+        logger.info(f"Final results keys: {list(results.keys())}")
 
         # Save synchronously since this function runs in a thread
         backtest_id = DatabaseService.save_backtest_result_sync(results, symbol)
-        logger.info(f"Backtest saved to database with ID: {backtest_id}")
+        save_time = time.time() - save_start
+        logger.info(f"Backtest saved to database with ID: {backtest_id} in {save_time:.2f}s")
+
+        total_time = time.time() - start_time
+        logger.info(f"Total backtest execution time: {total_time:.2f}s")
     except Exception as e:
         logger.error(f"Failed to save backtest to database: {e}")
+        logger.error(f"Results structure: {results}")
         raise HTTPException(status_code=500, detail=f"Failed to save backtest: {str(e)}")
 
     return results
@@ -533,7 +641,7 @@ async def get_ml_prediction(symbol: str, model_type: str = "rf"):
     """Get ML-based signal prediction"""
     try:
         # Get current indicators
-        kline_data = BybitService.fetch_klines(symbol, interval="240", limit=50)
+        kline_data = await BybitService.fetch_klines(symbol, interval="240", limit=50)
         if kline_data.get("retCode") != 0:
             raise HTTPException(status_code=400, detail="Failed to fetch data")
 
@@ -920,3 +1028,12 @@ async def get_performance_metrics(symbol: Optional[str] = None, days: int = 30):
 @app.get("/")
 async def root():
     return {"message": "Bybit AI Swing Trader Backend API - Enhanced with ML & Database"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "2.0.0"
+    }

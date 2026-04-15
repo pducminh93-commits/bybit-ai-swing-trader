@@ -36,18 +36,55 @@ AI-powered swing trading system for Bybit cryptocurrency exchange. Combines tech
    cd bybit-ai-swing-trader
    ```
 
-2. **Start the application**
+2. **Start the backend server**
    ```bash
+   cd backend
+
    # Windows
-   start.bat
+   start_server.bat
 
    # Linux/Mac
-   ./start.sh
+   chmod +x start_server.sh
+   ./start_server.sh
+
+   # Or manually:
+   pip install -r requirements.txt
+   python init_db.py
+   uvicorn main:app --reload --host 0.0.0.0 --port 8000
    ```
 
-3. **Access the app**
+3. **Start the frontend (in a new terminal)**
+   ```bash
+   cd frontend
+   npm install
+   npm start
+   ```
+
+4. **Access the app**
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
+   - API Docs: http://localhost:8000/docs
+
+## Troubleshooting
+
+### "Failed to load market data"
+This error occurs when the frontend cannot connect to the backend server.
+
+**Solution:**
+1. Ensure the backend server is running on port 8000
+2. Check that no firewall is blocking the connection
+3. Verify the backend logs for any startup errors
+
+### Backend server won't start
+**Check:**
+1. Python 3.8+ is installed
+2. All dependencies are installed: `pip install -r requirements.txt`
+3. Database is initialized: `python init_db.py`
+
+### Frontend won't start
+**Check:**
+1. Node.js is installed
+2. Dependencies are installed: `npm install`
    - API Docs: http://localhost:8000/docs
 
 ## Architecture

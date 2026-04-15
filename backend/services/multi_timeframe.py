@@ -15,7 +15,7 @@ class MultiTimeframeAnalysis:
         }
         self.analyses = {}
 
-    def analyze_all_timeframes(self) -> Dict[str, Dict[str, Any]]:
+    async def analyze_all_timeframes(self) -> Dict[str, Dict[str, Any]]:
         """Analyze symbol across multiple timeframes"""
         results = {}
 
@@ -24,9 +24,9 @@ class MultiTimeframeAnalysis:
                 # Fetch data for this timeframe
                 if interval == 'D':
                     # Bybit uses 'D' for daily
-                    data = BybitService.fetch_klines(self.symbol, interval='D', limit=100)
+                    data = await BybitService.fetch_klines(self.symbol, interval='D', limit=100)
                 else:
-                    data = BybitService.fetch_klines(self.symbol, interval=interval, limit=200)
+                    data = await BybitService.fetch_klines(self.symbol, interval=interval, limit=200)
 
                 if data.get('retCode') == 0:
                     klines = data['result']['list']
@@ -101,7 +101,7 @@ class MultiTimeframeAnalysis:
             short_timeframes = [tf for tf, data in timeframe_signals.items()
                                if data['signal'] == 'SHORT' and data['confidence'] > 0.6]
 
-            # Require at least 2 timeframes agreement for actionable signals
+            # Require at least 2 timeframes agreement for actionable signals, or fallback to 4h if strong
             if len(long_timeframes) >= 2 and signal_scores['LONG'] > signal_scores['SHORT']:
                 final_signal = 'LONG'
                 # Use weighted confidence from confirming timeframes
@@ -116,6 +116,13 @@ class MultiTimeframeAnalysis:
                                           for tf in short_timeframes)
                 confirming_weight = sum(timeframe_signals[tf]['weight'] for tf in short_timeframes)
                 final_confidence = confirming_confidence / confirming_weight if confirming_weight > 0 else confidence_avg
+
+            elif '4h' in timeframe_signals and timeframe_signals['4h']['confidence'] > 0.7:
+                # Fallback to 4h timeframe if it has high confidence signal
+                tf_4h = timeframe_signals['4h']
+                final_signal = tf_4h['signal']
+                final_confidence = tf_4h['confidence'] * tf_4h['weight']  # Apply weight
+                reasons.append(f"Fallback to 4h signal: {final_signal}")
 
             elif signal_scores['EXIT'] > signal_scores['HOLD']:
                 final_signal = 'EXIT'
