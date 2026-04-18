@@ -3,6 +3,17 @@
     "leverage": 10.0,
     "position_size_pct": 5.0,
     "is_running": true,
-    "positions": {},
+    "positions": {
+        "XRPUSDT": {
+            "symbol": "XRPUSDT",
+            "side": "SHORT",
+            "entry_price": 100.0,
+            "quantity": 0.1,
+            "entry_time": "2026-04-15T17:59:05.603253",
+            "current_price": 100.0,
+            "unrealized_pnl": 0.0,
+            "status": "OPEN"
+        }
+    },
     "history": []
 }

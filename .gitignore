@@ -26,3 +26,4 @@ build/
 *.egg-info/
 .vscode/
 .DS_Store
+.aider*

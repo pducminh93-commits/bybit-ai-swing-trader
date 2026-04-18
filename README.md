@@ -87,16 +87,35 @@ This error occurs when the frontend cannot connect to the backend server.
 2. Dependencies are installed: `npm install`
    - API Docs: http://localhost:8000/docs
 
-## Architecture
+## Project Structure
 
 ```
-├── backend/           # Python FastAPI backend
-│   ├── services/      # Business logic
-│   ├── models/        # ML models and data models
-│   └── main.py        # API endpoints
-├── frontend/          # React/TypeScript UI
-├── docker/            # Docker configuration
-└── docs/              # Documentation
+.
+├── backend/                 # Python FastAPI backend
+│   ├── main.py              # Main API application
+│   ├── bybit_trader.db      # SQLite database
+│   ├── demo_state.json      # Demo mode state
+│   ├── logs/                # Application logs
+│   │   └── bybit_trader.json
+│   ├── models/              # ML models and data models
+│   │   ├── universal_ensemble_model.pkl
+│   │   ├── universal_ensemble_scaler.pkl
+│   │   └── backups/         # Model backups
+│   │       └── *.pkl
+│   └── services/            # Business logic services
+│       └── *.py
+├── frontend/                # React/TypeScript UI
+│   └── tsconfig.tsbuildinfo # TypeScript build info
+├── models/                  # Additional models
+│   └── BTCUSDT_rf_model.pkl
+├── logs/                    # Logs directory
+│   └── bybit_trader.json
+├── bybit_trader.db          # Additional database file
+├── check_db.py              # Database check script
+├── force_recreate_db.py     # Force recreate database
+├── recreate_db.py           # Recreate database
+├── test_backtest.py         # Backtest testing script
+└── README.md                # This file
 ```
 
 ## API Examples

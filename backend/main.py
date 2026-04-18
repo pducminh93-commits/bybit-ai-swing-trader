@@ -419,19 +419,52 @@ def _run_backtest_sync(symbol: str, days: int, leverage: float = 10.0, min_hold_
         # Fetch historical data in parallel for better performance
         import asyncio
 
+        async def fetch_with_retry(fetch_func, name, max_retries=3):
+            """Fetch data with retry logic for network errors"""
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"Fetching {name} (attempt {attempt + 1}/{max_retries})")
+                    result = await fetch_func()
+                    return result
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {name} (attempt {attempt + 1}): {str(e)}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    else:
+                        logger.error(f"Failed to fetch {name} after {max_retries} attempts")
+                        raise
+
         async def fetch_all_data():
-            # Run API calls in parallel
-            kline_task = BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000))
-            oi_task = BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500)
-            fr_task = BybitService.fetch_funding_rate_history(symbol, limit=500)
+            """Fetch all required data with proper error handling"""
+            try:
+                # Run API calls in parallel with retry logic
+                kline_task = fetch_with_retry(
+                    lambda: BybitService.fetch_klines(symbol, interval="240", limit=min(days*6 + 100, 1000)),
+                    "klines"
+                )
+                oi_task = fetch_with_retry(
+                    lambda: BybitService.fetch_open_interest(symbol, intervalTime="4h", limit=500),
+                    "open interest"
+                )
+                fr_task = fetch_with_retry(
+                    lambda: BybitService.fetch_funding_rate_history(symbol, limit=500),
+                    "funding rates"
+                )
 
-            results = await asyncio.gather(kline_task, oi_task, fr_task, return_exceptions=True)
+                results = await asyncio.gather(kline_task, oi_task, fr_task, return_exceptions=True)
 
-            kline_data = results[0]
-            oi_result = results[1]
-            fr_result = results[2]
+                kline_data = results[0]
+                oi_result = results[1]
+                fr_result = results[2]
 
-            return kline_data, oi_result, fr_result
+                return kline_data, oi_result, fr_result
+
+            except Exception as e:
+                logger.error(f"Critical error during data fetching: {str(e)}")
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Network error: Unable to fetch market data. Please check your internet connection and try again. Error: {str(e)}"
+                )
 
         data_fetch_start = time.time()
         kline_data, oi_result, fr_result = asyncio.run(fetch_all_data())
