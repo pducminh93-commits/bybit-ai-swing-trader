@@ -118,6 +118,37 @@ This error occurs when the frontend cannot connect to the backend server.
 └── README.md                # This file
 ```
 
+## Proposed Improvements for CFA-Level Analysis
+
+Dựa trên cấu trúc dự án hiện tại và các tiêu chuẩn phân tích tài chính chuyên nghiệp (CFA), dưới đây là tổng hợp các điểm cần cải thiện để nâng cấp hệ thống Bybit AI Swing Trader từ một công cụ hỗ trợ kỹ thuật thành một hệ thống đầu tư có tư duy quản trị:
+
+### 1. Cải thiện về Logic Dữ liệu (Feature Engineering)
+Dữ liệu đầu vào quyết định 80% độ chính xác của Model. Hiện tại bạn đang dùng nến OHLC thuần túy, cần nâng cấp:
+- **Xử lý tính dừng (Stationarity)**: Chuyển đổi giá đóng cửa sang Log Returns hoặc sử dụng Fractional Differentiation để giữ lại giá trị lịch sử mà vẫn đảm bảo tính dừng.
+- **Đặc trưng vĩ mô**: Tích hợp các biến số như Chỉ số sức mạnh đồng USD (DXY) và lợi suất trái phiếu chính phủ.
+- **Dữ liệu On-chain**: Thêm các chỉ số như tỷ lệ nạp/rút lên sàn của cá mập (Exchange Flow) để làm tín hiệu cảnh báo sớm.
+
+### 2. Bổ sung các Model chuyên biệt (Architectural Upgrade)
+Đừng chỉ dựa vào Random Forest hay LSTM đơn lẻ, hãy xây dựng hệ thống phân lớp:
+- **HMM (Hidden Markov Model)**: Xác định "Trạng thái thị trường" (Market Regime). AI cần biết thị trường đang ở giai đoạn: Tăng trưởng ổn định, Biến động mạnh, hay Sideway.
+- **GARCH Model**: Dự báo độ biến động (Volatility). Đây là cốt lõi của CFA để tính toán Stop-loss động.
+- **Sentiment Analysis**: Một mô hình NLP nhỏ để theo dõi tâm lý đám đông qua tin tức hoặc chỉ số Fear & Greed.
+
+### 3. Nâng cấp Quản trị rủi ro (Risk Management - CFA Level III)
+Đây là điểm khác biệt lớn nhất giữa một Trader nghiệp dư và một quỹ đầu tư:
+- **Dynamic Position Sizing**: Thay đổi khối lượng lệnh dựa trên biến động thị trường (ATR-based) và số dư khả dụng.
+- **Monte Carlo Simulation**: Tích hợp vào Backtesting để giả lập hàng ngàn kịch bản xấu nhất (Black Swan).
+- **Tính toán VaR (Value at Risk)**: AI phải trả lời được câu hỏi: "Với độ tin cậy 95%, số tiền tối đa tôi có thể mất trong 24 giờ tới là bao nhiêu?"
+
+### 4. Tối ưu hóa Backtesting (Validation)
+Tránh hiện tượng "học vẹt" (Overfitting):
+- **Walk-forward Optimization**: Thay vì test trên một khoảng thời gian cố định, hãy dùng cơ chế cửa sổ trượt.
+- **Phân tích Chi phí cơ hội**: So sánh hiệu quả của AI với chiến lược Buy & Hold BTC thông qua chỉ số Information Ratio.
+
+### 5. Cấu trúc Hệ thống (Infrastructure)
+- **Unit Testing cho Logic Tài chính**: Viết test case cho các hàm tính toán Sharpe Ratio, Drawdown.
+- **Fail-safe Mechanism**: Bổ sung cơ chế ngắt mạch (Circuit Breaker). Nếu AI thua lỗ vượt quá một ngưỡng nhất định trong ngày, hệ thống phải tự động đóng toàn bộ vị thế.
+
 ## API Examples
 
 ### Get Trading Signals
